@@ -2,7 +2,7 @@
   "name": "elemental-realms-solitude",
   "version": "1.0.0",
   "private": true,
-  "description": "孤独领域 — 黑剑 BOSS 战竞技场版元素领域（elemental-realms）",
+  "description": "孤独领域 Solitude Realm",
   "type": "module",
   "scripts": {
     "dev": "vite",

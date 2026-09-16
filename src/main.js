@@ -39,3 +39,9 @@ function boot() {
 }
 
 boot();
+
+// 线上站点注册 Service Worker：大体量资源（场景 GLB / 解码器 / 构建产物）
+// 首次下载后进入缓存，二次访问即时加载。本地开发服务器不注册。
+if (location.hostname.includes('github.io') && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}

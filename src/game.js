@@ -77,15 +77,21 @@ export class Game {
 
     const startBtn = document.getElementById('startBtn');
     startBtn?.addEventListener('click', () => this.begin());
-    // 竞技场加载完成前禁用开始按钮（GLB 异步装载）
+    // 竞技场加载完成前禁用开始按钮（GLB 异步装载，显示下载进度）
     if (startBtn) {
       startBtn.disabled = true;
-      startBtn.textContent = '场景装载中…';
+      startBtn.textContent = '场景装载中… 0%';
     }
     this.world.onArenaReady = (ok) => {
       if (!startBtn) return;
       startBtn.disabled = false;
       startBtn.textContent = ok ? '开始游戏' : '场景加载失败 · 仍可开始';
+    };
+    this.world.onArenaProgress = (pct, loadedMB) => {
+      if (!startBtn) return;
+      startBtn.textContent = pct == null
+        ? `场景装载中… ${loadedMB.toFixed(0)}MB`
+        : `场景装载中… ${pct}%`;
     };
     document.getElementById('restartBtn')?.addEventListener('click', () => this.restart());
     document.getElementById('backToStartBtn')?.addEventListener('click', () => this.backToStart());

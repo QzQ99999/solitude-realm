@@ -129,7 +129,14 @@ function mergeArena(root) {
   return merged;
 }
 
-export function loadArena(scene, onReady) {
+/**
+ * 加载竞技场场景。
+ * @param {THREE.Scene} scene
+ * @param {(ok: boolean) => void} [onReady] 装载完成/失败回调
+ * @param {(pct: number|null, loadedMB: number) => void} [onProgress] 下载进度回调
+ *   （pct 为 0~99 的百分比；总大小未知时为 null，loadedMB 为已下载 MB 数）
+ */
+export function loadArena(scene, onReady, onProgress) {
   // 圆盘底衬：竞技场地面雕刻有镂空纹样，缝隙会透视到场景下方的虚空。
   // 在盘面下方贴一层深色石底盘（边缘藏进环墙基部），从缝隙里看到的就是
   // 石材底色而不是深渊；受主题灯光影响，改写世界时同样会被染色。
@@ -157,14 +164,21 @@ export function loadArena(scene, onReady) {
           object.receiveShadow = false;
         }
       });
-      // 关键优化：657 个静态网格按材质合并，draw call 从 ~660 降到几十
+      // 性能优化：静态网格按材质合并，draw call 从数百降到几十
       const merged = mergeArena(model);
       window.__arenaMerge = mergeArena.stats; // 供控制台检查合并结果
       for (const mesh of merged) model.add(mesh);
       scene.add(model);
       onReady?.(true);
     },
-    undefined,
+    (event) => {
+      if (!onProgress) return;
+      if (event.total > 0) {
+        onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)), event.loaded / 1048576);
+      } else {
+        onProgress(null, event.loaded / 1048576);
+      }
+    },
     (error) => {
       console.error('[arena] 场景加载失败', error);
       onReady?.(false);

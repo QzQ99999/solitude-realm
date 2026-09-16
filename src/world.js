@@ -92,10 +92,14 @@ export class World {
     this.candle = makeAmbientCandle(this.scene);
 
     // 黑剑 BOSS 战竞技场（异步加载，加载完成前玩法照常可用）
-    loadArena(this.scene, (ok) => {
-      this.arenaReady = ok;
-      this.onArenaReady?.(ok);
-    });
+    loadArena(
+      this.scene,
+      (ok) => {
+        this.arenaReady = ok;
+        this.onArenaReady?.(ok);
+      },
+      (pct, loadedMB) => this.onArenaProgress?.(pct, loadedMB)
+    );
 
     this.weather = new Weather(this.scene);
 
