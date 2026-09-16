@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>孤独领域 · Solitude Realm</title>
+  <script type="module" crossorigin src="./assets/index-Dya6bxkH.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BYPS3Ro2.css">
+</head>
+<body>
+  <canvas id="app"></canvas>
+
+  <div id="vignette"></div>
+  <div id="castFlash"></div>
+  <div id="testOut" style="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);font-size:14px;color:#ffd27a;z-index:30;pointer-events:none;text-shadow:0 1px 4px #000"></div>
+
+  <div id="gameOverScreen" class="is-hidden">
+    <h1>游戏结束</h1>
+    <p class="go-score">本局得分 <b id="finalScore">0</b></p>
+    <div class="go-actions">
+      <button id="backToStartBtn">返回初始界面</button>
+    </div>
+    <p class="tips">被元素之灵追上会掉血 · 注意走位</p>
+  </div>
+
+  <div id="pauseScreen" class="is-hidden">
+    <h1>已暂停</h1>
+    <div class="pause-cols">
+      <div class="pause-col">
+        <h2>操作</h2>
+        <p><strong>W A S D</strong> 移动</p>
+        <p><strong>滑动鼠标</strong> 旋转视角 · <strong>滚轮</strong> 缩放</p>
+        <p><strong>Q / E / R</strong> 选择技能（冷却 5 秒）</p>
+        <p><strong>按住右键</strong> 瞄准 · <strong>松开</strong> 释放技能</p>
+        <p><strong>按住左键</strong> 普通攻击（能量球路径命中）</p>
+        <p><strong>Shift</strong> 贴地飞行 · <strong>Esc</strong> 暂停/继续</p>
+      </div>
+      <div class="pause-col">
+        <h2>机制</h2>
+        <p>元素之灵生成后永久追击：普撞 -25%，特殊撞 -50%</p>
+        <p>特殊之灵需<strong>对应元素技能</strong>清除；或在<strong>同色领域</strong>内普攻 3 次（+30 分 +10% 血）</p>
+        <p><strong>生命恢复</strong>：连续击杀 9 个普通之灵 +20% 血（满血隐藏 · 被撞清零 · 技能杀不触发回血）</p>
+        <p><strong>体力</strong>：飞行 6 秒清零、耗尽禁飞，9 秒回满</p>
+        <p><strong>难度</strong>：每 100 分升一档（右上角 LV），最高 10 档 12+6 满配</p>
+        <p>受击后 1.5 秒无敌帧 · 血量归零游戏结束</p>
+      </div>
+    </div>
+    <p class="tips">按 Esc 或点击任意处继续游戏</p>
+  </div>
+
+  <div id="startScreen">
+    <h1>孤独领域</h1>
+    <p class="sub">Solitude Realm · 元素竞技场</p>
+    <button id="startBtn" disabled>场景装载中…</button>
+    <p class="tips">WASD 移动 · Q/E/R 技能 · 左键普攻 · 右键技能 · Shift 飞行 · H 查看</p>
+    <p class="tips" style="opacity:0.45">build 0917-A · 孤独领域版</p>
+  </div>
+
+  <div id="hud">
+    <div class="panel hud-title">
+      <h1>孤独领域</h1>
+      <span>施放法术，改写整个世界</span>
+    </div>
+
+    <div class="panel hud-health">
+      <span class="hud-health__label">生命</span>
+      <div class="hud-health__bar"><i id="healthFill"></i></div>
+      <b id="healthNum">100%</b>
+      <span class="hud-health__streak" id="streak"></span>
+    </div>
+
+    <div class="panel hud-stamina">
+      <span class="hud-health__label">体力</span>
+      <div class="hud-health__bar"><i id="staminaFill"></i></div>
+      <b id="staminaNum">100%</b>
+    </div>
+
+    <div class="panel hud-fps">
+      FPS <b id="fpsNum">--</b>
+    </div>
+
+    <div class="world-badge" id="worldBadge">
+      <span class="world-badge__glyph" id="worldGlyph">◇</span>
+      <span class="world-badge__name" id="worldName">元素荒原 · Neutral Realm</span>
+    </div>
+
+    <div class="lock-hint" id="lockHint">点击画面锁定鼠标 — 滑动无限旋转视角 · Esc 释放鼠标</div>
+
+    <div class="edge-hint" id="edgeHint"><i>⚑</i>已抵达场地边缘</div>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="panel hud-score">
+      <span class="hud-score__level" id="levelBadge">LV.1</span>
+      <span class="hud-score__label">元素之灵</span>
+      <b id="score">0</b>
+      <button id="pauseBtn" title="暂停 (Esc)">⏸</button>
+    </div>
+
+    <div class="panel hud-help is-hidden" id="help">
+      <div><strong>W A S D</strong> 移动 &nbsp; <strong>Shift</strong> 按住贴地飞行</div>
+      <div><strong>点击画面</strong> 锁定鼠标 &nbsp; <strong>滑动</strong> 旋转视角 &nbsp; <strong>Esc</strong> 释放</div>
+      <div><strong>Q / E / R</strong> 选择技能</div>
+      <div><strong>按住左键</strong> 普攻（能量球） &nbsp; <strong>按住右键</strong> 瞄准 &nbsp; <strong>松开</strong> 释放技能</div>
+      <div>元素之灵会追击并撞你掉血 · 用法术清除得分</div>
+      <div>特殊之灵：对应元素技能清除 · 或同色领域内普攻 3 次清除</div>
+      <div>生命恢复：连续击杀 9 个回复 20% 生命（满血时隐藏 · 被撞清零）</div>
+      <div>Shift 飞行消耗体力（6 秒清零 · 耗尽禁飞 · 9 秒回满）</div>
+      <div>每 30 秒出现特殊之灵 · 用对应元素技能清除得 30 分</div>
+      <div><kbd>H</kbd> 收起帮助</div>
+    </div>
+
+    <div class="skills" id="skills">
+      <div class="skill" data-element="ice" style="--accent:#56d8ff">
+        <i class="skill__cd"></i>
+        <em class="skill__key">Q</em>
+        <span class="skill__glyph">❄</span>
+        <span class="skill__name">霜新星</span>
+      </div>
+      <div class="skill" data-element="fire" style="--accent:#ff8a3c">
+        <i class="skill__cd"></i>
+        <em class="skill__key">E</em>
+        <span class="skill__glyph">🔥</span>
+        <span class="skill__name">落炎陨石</span>
+      </div>
+      <div class="skill" data-element="storm" style="--accent:#a98bff">
+        <i class="skill__cd"></i>
+        <em class="skill__key">R</em>
+        <span class="skill__glyph">⚡</span>
+        <span class="skill__name">天雷殛灭</span>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
