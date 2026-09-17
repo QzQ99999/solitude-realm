@@ -203,14 +203,17 @@ export class HUD {
   setCooldown(element, remaining, total) {
     const skill = this.skills.get(element);
     if (!skill) return;
+    const done = remaining <= 0.001;
     const ratio = Math.max(0, Math.min(1, remaining / Math.max(total, 0.001)));
-    if (Math.abs(ratio - (this._cooldownShown.get(element) ?? -1)) < 0.01) return;
+    // 冷却结束（就绪）的最终状态必须始终应用，否则读秒会卡在 1；
+    // 冷却过程中数值变化小于阈值时才允许跳过，避免无意义的 DOM 写入
+    if (!done && Math.abs(ratio - (this._cooldownShown.get(element) ?? -1)) < 0.005) return;
     this._cooldownShown.set(element, ratio);
     skill.root.style.setProperty('--cd', ratio);
-    skill.root.classList.toggle('is-cooling', ratio > 0.001);
-    skill.root.classList.toggle('is-empty', ratio > 0.001);
+    skill.root.classList.toggle('is-cooling', !done);
+    skill.root.classList.toggle('is-empty', !done);
     // 冷却读秒计数器
-    if (skill.numEl) skill.numEl.textContent = ratio > 0.001 ? Math.ceil(remaining) : '';
+    if (skill.numEl) skill.numEl.textContent = done ? '' : Math.ceil(remaining);
   }
 
   toggleHelp() {
