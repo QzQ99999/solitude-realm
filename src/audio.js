@@ -111,10 +111,12 @@ class AudioEngine {
     this.duckMusic(false);
   }
 
-  /** 普通攻击发射（短促能量 zap）。 */
+  /** 普通攻击发射（明亮 zap：双层扫频 + 高频噪声，随机音高让每发都清晰可辨）。 */
   shoot() {
-    this.tone({ type: 'square', f0: 1400, f1: 320, dur: 0.11, gain: 0.13 });
-    this.noise({ dur: 0.07, gain: 0.08, type: 'bandpass', f0: 2600, f1: 900, q: 2 });
+    const v = 0.88 + Math.random() * 0.32;
+    this.tone({ type: 'square', f0: 1500 * v, f1: 280 * v, dur: 0.13, gain: 0.2 });
+    this.tone({ type: 'sawtooth', f0: 720 * v, f1: 130 * v, dur: 0.1, gain: 0.12 });
+    this.noise({ dur: 0.1, gain: 0.13, type: 'bandpass', f0: 2800, f1: 900, q: 1.6 });
   }
 
   /** 普通攻击命中（噪声冲击 + 低频垫）。 */
@@ -134,6 +136,31 @@ class AudioEngine {
   deflect() {
     this.tone({ type: 'sine', f0: 300, f1: 175, dur: 0.1, gain: 0.11 });
     this.noise({ dur: 0.07, gain: 0.05, type: 'bandpass', f0: 900, q: 2 });
+  }
+
+  /** 光柱预警：0.5 秒上行啸音（能量聚集）。 */
+  pillarWarn() {
+    this.tone({ type: 'sine', f0: 600, f1: 1250, dur: 0.5, gain: 0.13 });
+    this.noise({ dur: 0.5, gain: 0.07, type: 'bandpass', f0: 900, f1: 2600, q: 1.2 });
+  }
+
+  /** 光柱落下：重 zap + 低频轰鸣。 */
+  pillarStrike() {
+    this.noise({ dur: 0.35, gain: 0.28, type: 'highpass', f0: 1000 });
+    this.tone({ type: 'sawtooth', f0: 220, f1: 55, dur: 0.4, gain: 0.24 });
+    this.tone({ type: 'sine', f0: 90, f1: 40, dur: 0.5, gain: 0.28, when: 0.02 });
+  }
+
+  /** 特殊之灵激光蓄能预警（1 秒上行充电音，提示躲避）。 */
+  laserCharge() {
+    this.tone({ type: 'sawtooth', f0: 700, f1: 1700, dur: 1.0, gain: 0.09 });
+    this.tone({ type: 'sine', f0: 1400, f1: 3100, dur: 1.0, gain: 0.05 });
+  }
+
+  /** 特殊之灵激光射击（高频 zap）。 */
+  laserFire() {
+    this.tone({ type: 'sawtooth', f0: 1900, f1: 260, dur: 0.22, gain: 0.16 });
+    this.noise({ dur: 0.18, gain: 0.11, type: 'highpass', f0: 1500 });
   }
 
   /** 角色受击（失真下坠）。 */

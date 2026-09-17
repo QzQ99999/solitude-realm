@@ -7,6 +7,7 @@ import { HUD } from './hud.js';
 import { EdgeBoundary } from './edge.js';
 import { GroundFX } from './groundfx.js';
 import { FlightTrail } from './trail.js';
+import { PillarField } from './pillars.js';
 import { audio } from './audio.js';
 import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES } from './themes.js';
 
@@ -49,6 +50,7 @@ export class Game {
     this.edge = new EdgeBoundary(this.scene); // 场地边缘感知层
     this.groundFx = new GroundFX(this.scene); // 施法全场地特效（染色浪潮/地裂）
     this.flightTrail = new FlightTrail(this.scene); // Shift 飞行拖尾光带
+    this.pillars = new PillarField(this.scene, (dmg) => this._onPlayerHit(dmg)); // LV.5+ 天降光柱
     this.hud = new HUD();
     // 之灵数量随分数增长的目标值（初始温和，逐步提升）
     this._normalTarget = 3;
@@ -556,6 +558,10 @@ export class Game {
   _updateSpiritTargets() {
     if (this._tierMem === undefined) this._tierMem = this.tier;
     if (this.tier > this._tierMem) audio.levelUp(); // 升级音
+    // 新机制解锁提示
+    if (this._tierMem < 3 && this.tier >= 3) {
+      this.hud.showToast('⚠ 天空开始降下元素光柱 — 远离地面光圈！', 3200);
+    }
     this._tierMem = this.tier;
     const t = Game.TIERS[this.tier - 1];
     this.spirits.setNormalTarget(t.normal);
@@ -937,6 +943,7 @@ export class Game {
       if (this._basicT <= 0) {
         this._basicT = 0.32;
         const accent = ELEMENT_INFO[this.element].accent;
+        audio.shoot(); // 每颗能量球的射击音
         this.player.playCast();
         this.player.getOrbWorldPosition(this._orbPos);
         this.spells.castBasic(
@@ -961,9 +968,14 @@ export class Game {
 
     this.spells.update(dt);
     this.spirits.update(dt, this.elapsed, this.player.position);
+    this.spirits.laserTier = this.tier; // LV.5+ 特殊之灵激光射击速率
     this.world.update(dt, this.elapsed, this.player.position, this.hud.vignette);
     // 全场地特效：浪潮/地裂推进；领域残辉跟随当前世界（退回荒原即消散）
     this.groundFx.update(dt, this.world.currentAccent, this.world.current !== 'neutral');
+    // LV.5+ 天降光柱
+    this.pillars.setTier(this.tier);
+    this.pillars.setAccent(this.world.currentAccent);
+    this.pillars.update(dt, this.elapsed, this.player.position);
 
     // 世界还原：上次施法 6 秒内没有再施法，世界退回元素荒原
     if (this.started && !this.over && this._worldRevertT > 0) {
@@ -994,6 +1006,7 @@ export class Game {
     this.edge.dispose();
     this.groundFx.dispose();
     this.flightTrail.dispose();
+    this.pillars.dispose();
     this.world.dispose();
     this.renderer.dispose();
   }

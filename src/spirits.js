@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { ELEMENT_INFO } from './themes.js';
+import { audio } from './audio.js';
 
 const SPIRIT_COUNT = 12; // 之灵池容量：随分数增长最多同时 12 颗在场
 const AREA = 40;
+const _LASER_X_AXIS = new THREE.Vector3(1, 0, 0); // 激光网格的基准朝向
+const _LASER_TMP = new THREE.Vector3();
+const _LASER_NEG_Y = new THREE.Vector3(0, -1, 0); // 锥形光束的窄端朝向
 
 /* 追逐参数：生成后永远追逐玩家，速度比步行(6.2)快、比飞行(17)慢。 */
 const CHASE_SPEED = 7.2;
@@ -117,6 +121,8 @@ export class SpiritField {
     this._frozen = false;
     this._normalTarget = 3;
     this._specialTarget = 1;
+    /** LV.5+ 特殊之灵激光射击：由 game.js 每帧同步当前等级。 */
+    this.laserTier = 1;
 
     /* ---- 特殊元素之灵「堕圣遗物」：黑铁圣物匣 + 元素邪光晶体 + 符文铁环 ---- */
     this.specials = [];
@@ -183,7 +189,33 @@ export class SpiritField {
       group.visible = false;
       this._group.add(group);
 
-      this.specials.push({
+      // LV.5+ 激光：预警线（闪烁）与射击光束各一条，平时隐藏
+      const laserTele = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 0.07, 0.07),
+        new THREE.MeshBasicMaterial({
+          color: '#9fd8ff', transparent: true, opacity: 0,
+          blending: THREE.AdditiveBlending, depthWrite: false
+        })
+      );
+      const laserBeam = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 0.35, 0.35),
+        new THREE.MeshBasicMaterial({
+          color: '#ffffff', transparent: true, opacity: 0,
+          blending: THREE.AdditiveBlending, depthWrite: false
+        })
+      );
+      const laserGlow = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 0.9, 0.9),
+        new THREE.MeshBasicMaterial({
+          color: '#9fd8ff', transparent: true, opacity: 0,
+          blending: THREE.AdditiveBlending, depthWrite: false
+        })
+      );
+      laserTele.visible = false;
+      laserBeam.visible = false;
+      laserGlow.visible = false;
+      this._group.add(laserTele, laserBeam, laserGlow);
+      const slot = {
         group, core, crystal, ring, halo,
         alive: false,
         element: 'ice',
@@ -192,8 +224,140 @@ export class SpiritField {
         phase: Math.random() * Math.PI * 2,
         flash: 0,
         basicHits: 0, // 同色领域内被普通攻击命中的次数（3 次清除）
-        wander: new THREE.Vector3()
-      });
+        wander: new THREE.Vector3(),
+        laserTele,
+        laserBeam,
+        laserGlow,
+        laser: {
+          state: 'idle', // idle → tele（0.7s 闪烁预警）→ fire（0.22s）→ idle
+          t: 0,
+          cd: 1.5 + Math.random() * 1.5,
+          from: new THREE.Vector3(),
+          dir: new THREE.Vector3(),
+          len: 0,
+          hitDone: false
+        }
+      };
+      this.specials.push(slot);
+    }
+  }
+
+  /* —— LV.5+ 特殊之灵激光射击 —— */
+
+  /** 激光冷却：LV5 约 2.2 秒，每级缩短 0.35s，LV10 起贴近普攻速率（0.45s），±20% 浮动。 */
+  _laserCd() {
+    return Math.max(0.45, 2.2 - (this.laserTier - 5) * 0.35) * (0.8 + Math.random() * 0.4);
+  }
+
+  /** 把预警线/光束网格摆到 from→dir 射线上：起点在 from，向 dir 延伸 len 长。 */
+  _placeBeam(mesh, from, dir, len, w) {
+    mesh.position.copy(from).addScaledVector(dir, len / 2);
+    mesh.scale.set(len, w, w);
+    mesh.quaternion.setFromUnitVectors(
+      _LASER_X_AXIS,
+      _LASER_TMP.copy(dir).normalize()
+    );
+  }
+
+
+  _updateLaser(slot, dt, playerPos) {
+    const L = slot.laser;
+    L.t += dt;
+
+    if (this.laserTier < 5 || this._frozen || !playerPos) {
+      if (L.state !== 'idle') {
+        L.state = 'idle';
+        L.cd = this._laserCd();
+        slot.laserTele.visible = false;
+        slot.laserBeam.visible = false;
+        slot.laserGlow.visible = false;
+      }
+      return;
+    }
+
+    switch (L.state) {
+      case 'idle': {
+        slot.laserTele.visible = false;
+        slot.laserBeam.visible = false;
+        slot.laserGlow.visible = false;
+        L.cd -= dt;
+        if (L.cd <= 0) {
+          // 锁定玩家当前位置：激光从特殊之灵体内单方向射向该点，到点为止
+          L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
+          L.dir.set(playerPos.x - L.from.x, 1.15 - slot.baseY, playerPos.z - L.from.z);
+          L.len = L.dir.length();
+          L.dir.divideScalar(L.len); // 单位方向
+          if (L.len > 2.2) {
+            L.state = 'tele';
+            L.t = 0;
+            L.hitDone = false;
+            slot.laserTele.material.color.set(
+              SPECIAL_ACCENTS[slot.element] ?? ELEMENT_INFO[slot.element].accent
+            );
+            slot.laserGlow.material.color.set(
+              SPECIAL_ACCENTS[slot.element] ?? ELEMENT_INFO[slot.element].accent
+            );
+            slot.laserTele.visible = true;
+            audio.laserCharge(); // 蓄能预警音
+          } else {
+            L.cd = 0.5; // 离玩家太近不射，稍后再试
+          }
+        }
+        break;
+      }
+      case 'tele': {
+        // 起点始终跟随特殊之灵当前位置：预警线从之灵体内射向地图外，不穿过之灵反侧
+        L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
+        // 路径提示闪烁 1.0 秒，更亮更粗
+        slot.laserTele.material.opacity = 0.45 + 0.5 * Math.abs(Math.sin(L.t * 12));
+        this._placeBeam(slot.laserTele, L.from, L.dir, L.len + 170, 0.9);
+        if (L.t >= 1.0) {
+          L.state = 'fire';
+          L.t = 0;
+          slot.laserTele.visible = false;
+          slot.laserBeam.visible = true;
+          slot.laserGlow.visible = true;
+          // 发射源迸光：强调激光从特殊之灵体内射出
+          this.bursts.emit({
+            pos: L.from, count: 16, speed: [2, 6], up: [0.5, 3], life: [0.2, 0.5],
+            size: [8, 20], colorA: '#ffffff',
+            colorB: SPECIAL_ACCENTS[slot.element] ?? ELEMENT_INFO[slot.element].accent,
+            gravity: -2, drag: 2, spread: 0.8
+          });
+          audio.laserFire(); // 射击音
+        }
+        break;
+      }
+      case 'fire': {
+        const dur = 0.22;
+        // 起点跟随特殊之灵；锥形激光更细，单方向延伸出地图外
+        L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
+        this._placeBeam(slot.laserBeam, L.from, L.dir, L.len + 170, 0.35);
+        this._placeBeam(slot.laserGlow, L.from, L.dir, L.len + 170, 0.9);
+        slot.laserBeam.material.opacity = 1 - L.t / dur;
+        slot.laserGlow.material.opacity = 0.6 * (1 - L.t / dur);
+        // 命中判定：玩家到射线（单方向、延伸出地图外）的垂直距离 <1.1m（每发只结算一次）
+        if (!L.hitDone) {
+          const d = Math.hypot(L.dir.x, L.dir.z) || 1;
+          const ux = L.dir.x / d, uz = L.dir.z / d; // 单位方向
+          const dxp = playerPos.x - L.from.x;
+          const dzp = playerPos.z - L.from.z;
+          const a = Math.max(0, Math.min(L.len + 170, dxp * ux + dzp * uz));
+          const px = L.from.x + ux * a;
+          const pz = L.from.z + uz * a;
+          if (Math.hypot(playerPos.x - px, playerPos.z - pz) < 1.1) {
+            L.hitDone = true;
+            this.onPlayerHit?.(10); // 激光命中：-10% 生命
+          }
+        }
+        if (L.t >= dur) {
+          slot.laserBeam.visible = false;
+          slot.laserGlow.visible = false;
+          L.state = 'idle';
+          L.cd = this._laserCd();
+        }
+        break;
+      }
     }
   }
 
@@ -250,6 +414,18 @@ export class SpiritField {
   /** 游戏结束：冻结所有之灵。 */
   setFrozen(frozen) {
     this._frozen = frozen;
+    if (frozen) {
+      // 冻结时收起所有激光
+      for (const slot of this.specials) {
+        slot.laserTele.visible = false;
+        slot.laserBeam.visible = false;
+        slot.laserGlow.visible = false;
+        if (slot.laser.state !== 'idle') {
+          slot.laser.state = 'idle';
+          slot.laser.cd = this._laserCd();
+        }
+      }
+    }
   }
 
   /** 设置场上普通之灵/特殊之灵的目标数量（随分数增长）。 */
@@ -319,6 +495,13 @@ export class SpiritField {
     const originZ = playerPos ? playerPos.z : 0;
     slot.pos.set(originX + Math.cos(angle) * dist, slot.baseY, originZ + Math.sin(angle) * dist);
     slot.wander.set(0, 0, 0);
+    // 激光状态复位
+    slot.laser.state = 'idle';
+    slot.laser.t = 0;
+    slot.laser.cd = 1.2 + Math.random() * 1.2;
+    slot.laser.hitDone = false;
+    slot.laserTele.visible = false;
+    slot.laserBeam.visible = false;
 
     slot.core.material.emissive.set(accent);
     slot.crystal.material.emissive.set(accent);
@@ -445,8 +628,16 @@ export class SpiritField {
     }
 
     for (const slot of this.specials) {
-      if (!slot.alive) continue;
-
+      if (!slot.alive) {
+        // 死亡的特殊之灵：确保激光收起
+        if (slot.laserTele.visible || slot.laserBeam.visible) {
+          slot.laserTele.visible = false;
+          slot.laserBeam.visible = false;
+          slot.laser.state = 'idle';
+          slot.laser.cd = this._laserCd();
+        }
+        continue;
+      }
       slot.flash = Math.max(0, slot.flash - dt);
       slot.phase += dt;
 
@@ -502,6 +693,9 @@ export class SpiritField {
       slot.crystal.material.emissiveIntensity = 2.6 + flashK * 9
         + Math.sin(elapsed * 3.1 + slot.phase) * 0.5;
       slot.halo.scale.setScalar(3.2 + flashK * 1.4 + Math.sin(elapsed * 2.6 + slot.pos.z) * 0.2);
+
+      // —— LV.5+ 激光射击 ——
+      this._updateLaser(slot, dt, playerPos);
     }
 
     for (let i = 0; i < this.spirits.length; i++) {

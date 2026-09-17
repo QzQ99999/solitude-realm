@@ -319,17 +319,42 @@ export class SpellManager {
 
     this._scratchDir = new THREE.Vector3();
 
-    // 普通攻击：能量球池
+    // 普通攻击：能量球池（白色核心 + 元素色光壳 + 光晕，尺寸加大保证醒目）
     this._balls = [];
-    const ballGeometry = new THREE.SphereGeometry(0.17, 10, 8);
+    const ballGeometry = new THREE.SphereGeometry(0.16, 12, 10);
+    const shellGeometry = new THREE.SphereGeometry(0.32, 14, 12);
+    const haloCanvas = document.createElement('canvas');
+    haloCanvas.width = haloCanvas.height = 64;
+    const haloCtx = haloCanvas.getContext('2d');
+    const haloGrad = haloCtx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    haloGrad.addColorStop(0, 'rgba(255,255,255,1)');
+    haloGrad.addColorStop(0.4, 'rgba(255,255,255,0.32)');
+    haloGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    haloCtx.fillStyle = haloGrad;
+    haloCtx.fillRect(0, 0, 64, 64);
+    this._ballHaloTexture = new THREE.CanvasTexture(haloCanvas);
     for (let i = 0; i < 8; i++) {
-      const mesh = new THREE.Mesh(
+      const group = new THREE.Group();
+      const core = new THREE.Mesh(
         ballGeometry,
-        new THREE.MeshBasicMaterial({ color: '#9fd8ff', transparent: true, opacity: 0.95 })
+        new THREE.MeshBasicMaterial({ color: '#ffffff' })
       );
-      mesh.visible = false;
-      scene.add(mesh);
-      this._balls.push({ mesh, busy: false });
+      const shell = new THREE.Mesh(
+        shellGeometry,
+        new THREE.MeshBasicMaterial({
+          color: '#9fd8ff', transparent: true, opacity: 0.55,
+          blending: THREE.AdditiveBlending, depthWrite: false
+        })
+      );
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this._ballHaloTexture, color: '#9fd8ff', transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      }));
+      halo.scale.setScalar(1.9);
+      group.add(core, shell, halo);
+      group.visible = false;
+      scene.add(group);
+      this._balls.push({ group, core, shell, halo, busy: false });
     }
 
     this._active = [];
@@ -350,9 +375,11 @@ export class SpellManager {
   castBasic(from, to, color, onMove, onImpact) {
     const slot = this._balls.find((ball) => !ball.busy) ?? this._balls[0];
     slot.busy = true;
-    slot.mesh.visible = true;
-    slot.mesh.material.color.set(color);
-    slot.mesh.position.copy(from);
+    slot.group.visible = true;
+    slot.shell.material.color.set(color);
+    slot.halo.material.color.set(color);
+    slot.group.position.copy(from);
+    slot.group.scale.setScalar(1.3);
     this._active.push({
       type: 'basic',
       t: 0,
@@ -371,26 +398,27 @@ export class SpellManager {
   _tickBasic(state, dt) {
     state.t += dt;
     const k = Math.min(1, state.t / state.duration);
-    state.slot.mesh.position.lerpVectors(state.start, state.point, k);
+    state.slot.group.position.lerpVectors(state.start, state.point, k);
     // 路径命中：飞行途中每帧回报位置，沿途的元素之灵都能被打到（同一之灵只结算一次）
-    state.onMove?.(state.slot.mesh.position, state.hitSet);
-    if (Math.random() < 0.5) {
-      this.bursts.emit({
-        pos: state.slot.mesh.position, count: 1, speed: [0.2, 1], up: [0, 0.6],
-        life: [0.15, 0.35], size: [6, 12], colorA: '#ffffff', colorB: state.color,
-        gravity: 0, drag: 2, spread: 0.25
-      });
-    }
+    state.onMove?.(state.slot.group.position, state.hitSet);
+    // 明亮拖尾：每帧必发 2 颗粒子
+    this.bursts.emit({
+      pos: state.slot.group.position, count: 2, speed: [0.2, 1.2], up: [0, 0.7],
+      life: [0.18, 0.42], size: [9, 20], colorA: '#ffffff', colorB: state.color,
+      gravity: 0, drag: 2, spread: 0.3
+    });
+    // 呼吸脉动，远看也醒目
+    state.slot.group.scale.setScalar(1.15 + 0.2 * Math.sin(state.t * 34));
     if (k >= 1 && !state.fired) {
       state.fired = true;
-      state.slot.mesh.visible = false;
+      state.slot.group.visible = false;
       state.slot.busy = false;
       this.bursts.emit({
-        pos: state.point, count: 26, speed: [1.5, 5.5], up: [1, 4.5], life: [0.2, 0.5],
-        size: [6, 14], colorA: '#ffffff', colorB: state.color, gravity: -8, drag: 1.6
+        pos: state.point, count: 44, speed: [1.5, 6], up: [1, 5], life: [0.2, 0.55],
+        size: [8, 20], colorA: '#ffffff', colorB: state.color, gravity: -8, drag: 1.6
       });
-      this.wave.trigger(state.point, state.color, 1.6);
-      this._flash(state.point, state.color, 60);
+      this.wave.trigger(state.point, state.color, 2.4);
+      this._flash(state.point, state.color, 110);
       state.onImpact(state.point, 1.8, state.hitSet);
     }
     return state.fired && state.t > state.duration + 0.15;
@@ -703,5 +731,12 @@ export class SpellManager {
     this._meteor.geometry.dispose();
     for (const scorch of this._scorch) scorch.mesh.geometry.dispose();
     for (const child of this._bolt.children) child.geometry?.dispose?.();
+    for (const ball of this._balls) {
+      ball.group.traverse((o) => o.geometry?.dispose?.());
+      ball.core.material.dispose();
+      ball.shell.material.dispose();
+      ball.halo.material.dispose();
+    }
+    this._ballHaloTexture.dispose();
   }
 }
