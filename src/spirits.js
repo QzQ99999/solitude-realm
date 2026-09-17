@@ -17,6 +17,10 @@ const SPECIAL_FLASH_TIME = 0.35; // 属性不符时的免疫闪光时长
 const SPECIAL_SPEED = 4.0; // 移动速度慢于普通之灵的追逐速度(7.2)
 const SPECIAL_TOUCH_RADIUS = 1.8; // 撞到玩家的距离
 const TOUCH_DAMAGE_SPECIAL = 50; // 特殊之灵撞到玩家扣的血
+
+/* 特殊之灵的显示强调色：冰属性加深为更饱和的钴蓝，
+ * 与浅蓝的普通缚灵拉开区分；未列出的元素沿用领域主题色。 */
+const SPECIAL_ACCENTS = { ice: '#2f7dff' };
 const SPAWN_MIN_RANGE = 20; // 生成时距离角色的最小距离（米）
 
 /** 随机生成下一次特殊之灵的出现间隔（1~30 秒）。 */
@@ -295,6 +299,7 @@ export class SpiritField {
   /**
    * 生成一个特殊元素之灵：随机元素，出现在玩家周围 10~22 米。
    * 颜色即提示——必须用相同元素的技能才能清除。
+   * 冰属性加深为更纯正的蓝，避免与浅蓝的普通缚灵混淆。
    */
   spawnSpecial(playerPos) {
     const slot = this.specials.find((s) => !s.alive);
@@ -302,7 +307,7 @@ export class SpiritField {
 
     const elements = ['ice', 'fire', 'storm'];
     const element = elements[Math.floor(Math.random() * elements.length)];
-    const accent = ELEMENT_INFO[element].accent;
+    const accent = SPECIAL_ACCENTS[element] ?? ELEMENT_INFO[element].accent;
     slot.element = element;
     slot.alive = true;
     slot.flash = 0;
@@ -345,11 +350,13 @@ export class SpiritField {
    *     普通攻击在**同色领域**（worldFamily 与之灵元素相同）命中 3 次也可清除。
    * @param {string} worldFamily   当前世界领域 id（'neutral'|'ice'|'fire'|'storm'）
    * @param {Set} [hitSet]         本次攻击已结算过的特殊之灵（普攻飞行多帧时防止重复计伤）
-   * @returns {{normal: number, special: number, immune: number}}
+   * @returns {{normal: number, special: number, specialHit: number, immune: number}}
+   *   specialHit：普攻命中特殊之灵但未击败的次数（同色领域吸收伤害）
    */
   collectAt(point, radius, element = 'basic', worldFamily = 'neutral', hitSet) {
     let normal = 0;
     let special = 0;
+    let specialHit = 0;
     let immune = 0;
 
     for (const spirit of this.spirits) {
@@ -402,8 +409,14 @@ export class SpiritField {
             });
             special++;
           } else {
-            // 受击反馈：短促闪光
+            // 受击反馈：短促闪光 + 落点迸出小簇火花（普攻打击特殊之灵成功吸收）
             slot.flash = SPECIAL_FLASH_TIME;
+            specialHit++;
+            this.bursts.emit({
+              pos: slot.pos, count: 12, speed: [1.5, 4.5], up: [0.8, 3], life: [0.2, 0.45],
+              size: [5, 12], colorA: '#ffffff', colorB: '#' + this._accent.getHexString(),
+              gravity: -2, drag: 2, spread: 0.7
+            });
           }
         } else {
           // 属性不符 / 领域不对：免疫闪光
@@ -413,7 +426,7 @@ export class SpiritField {
       }
     }
 
-    return { normal, special, immune };
+    return { normal, special, specialHit, immune };
   }
 
   update(dt, elapsed, playerPos) {

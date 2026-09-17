@@ -757,6 +757,26 @@ body {
   opacity: 0.85;
 }
 
+/* 冷却读秒计数器：覆盖在技能卡中央，冷却时显示剩余秒数 */
+.skill__cd-num {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #eef6ff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.skill.is-cooling .skill__cd-num {
+  opacity: 1;
+}
+
 .skill__glyph {
   display: block;
   font-size: 24px;

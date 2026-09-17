@@ -33,7 +33,8 @@ export class HUD {
     for (const element of document.querySelectorAll('.skill')) {
       this.skills.set(element.dataset.element, {
         root: element,
-        card: null
+        card: null,
+        numEl: element.querySelector('.skill__cd-num')
       });
       element.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
@@ -208,6 +209,8 @@ export class HUD {
     skill.root.style.setProperty('--cd', ratio);
     skill.root.classList.toggle('is-cooling', ratio > 0.001);
     skill.root.classList.toggle('is-empty', ratio > 0.001);
+    // 冷却读秒计数器
+    if (skill.numEl) skill.numEl.textContent = ratio > 0.001 ? Math.ceil(remaining) : '';
   }
 
   toggleHelp() {

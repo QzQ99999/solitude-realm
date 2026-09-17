@@ -7,6 +7,7 @@ import { HUD } from './hud.js';
 import { EdgeBoundary } from './edge.js';
 import { GroundFX } from './groundfx.js';
 import { FlightTrail } from './trail.js';
+import { audio } from './audio.js';
 import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES } from './themes.js';
 
 const COOLDOWNS = { ice: 5, fire: 5, storm: 5 }; // 技能统一 5 秒冷却
@@ -74,6 +75,7 @@ export class Game {
     this._testT = 0;
     this._instanceId = Math.random().toString(36).slice(2, 6);
     window.__game = this; // 调试/自动化验证句柄
+    window.audio = audio; // 调试句柄：控制台可 audio.ctx / audio.setRealm() 等
 
     const startBtn = document.getElementById('startBtn');
     startBtn?.addEventListener('click', () => this.begin());
@@ -81,8 +83,7 @@ export class Game {
     if (startBtn) {
       startBtn.disabled = true;
       startBtn.textContent = '场景装载中… 0%';
-    }
-    this.world.onArenaReady = (ok) => {
+    }    this.world.onArenaReady = (ok) => {
       if (!startBtn) return;
       startBtn.disabled = false;
       startBtn.textContent = ok ? '开始游戏' : '场景加载失败 · 仍可开始';
@@ -208,6 +209,7 @@ export class Game {
 
     this.world.onShift = ({ theme }) => {
       this.hud.setWorld(theme);
+      audio.setRealm(theme.id); // 领域环境音随世界切换
       if (theme.id !== 'neutral') {
         this.hud.showToast(`世界已改写 → ${theme.glyph} ${theme.label}`);
         this.spirits.setAccent(theme.accent);
@@ -293,6 +295,7 @@ export class Game {
     // 每次按下都把落点重置回角色身边（原点 = 人物位置），再由拖动拉远。
     this.canvas.addEventListener('pointerdown', (event) => {
       if (!this.started || this.over || this.paused) return;
+      audio.ensure(); // 首次点击画面：激活音频上下文（自动播放策略）
       if (event.button === 2) {
         this._aiming = true;
         this._resetAimToPlayer();
@@ -350,6 +353,7 @@ export class Game {
     if (this.paused === paused) return;
     this.paused = paused;
     if (paused) {
+      audio.pause(); // Esc 暂停音（音乐同时闪避）
       this._attacking = false;
       this._aiming = false;
       this.keys.clear();
@@ -358,6 +362,7 @@ export class Game {
       this.hud.setEdgeHint(false); // 暂停时收起边缘提示
       if (document.pointerLockElement) document.exitPointerLock();
     } else {
+      audio.unpause(); // 恢复继续音（音乐解除闪避）
       this.hud.hidePause();
       this._ensureLock(); // 立即回到锁定鼠标状态（冷却期内自动重试）
     }
@@ -381,6 +386,9 @@ export class Game {
   /** 点击"开始游戏"后调用：正式启动玩法并直接锁定鼠标，元素之灵立即生成。 */
   begin() {
     if (this.started) return;
+    audio.ensure(); // 用户手势：激活音频上下文
+    audio.click();  // 开始按钮点击音
+    audio.startMusic(); // 背景音乐（ Chillhop 循环）
     this.started = true;
     this.paused = false;
     this.hud.hidePause();
@@ -396,6 +404,8 @@ export class Game {
   _onPlayerHit(damage) {
     if (this.over) return;
     if (this._invulnT > 0) return; // 受击无敌帧，防止围攻瞬间连击致死
+    audio.hurt();   // 受击反馈音
+    audio.shield(); // 无敌护盾展开音
     this.hp = Math.max(0, this.hp - damage);
     this.hud.setHealth(this.hp);
     this.hud.hurtFlash();
@@ -416,6 +426,7 @@ export class Game {
     if (this.over || this.hp >= 100) return;
     this.hp = Math.min(100, this.hp + percent);
     this.hud.setHealth(this.hp);
+    audio.heal(); // 生命恢复音
     this.hud.showToast(`${reason} — 生命 +${percent}%`, 1500);
   }
 
@@ -441,6 +452,8 @@ export class Game {
     this._attacking = false;
     this._aiming = false;
     this.keys.clear();
+    audio.death(); // 被击败音效
+    audio.stopMusic(2.5); // 背景音乐随败局淡出
     this.spirits.setFrozen(true);
     // 解除鼠标锁定，光标立即出现以便点击按钮
     if (document.pointerLockElement) document.exitPointerLock();
@@ -469,6 +482,7 @@ export class Game {
     this.spells.reset();
     this.spirits.setFrozen(false);
     this.spirits.respawnAll(this.player.position, 3);
+    audio.startMusic(); // 重开一局：背景音乐继续（被击败时已淡出）
     this.hud.setScore(0);
     this.hud.setHealth(100);
     this.hud.setLevel(1);
@@ -480,6 +494,8 @@ export class Game {
 
   /** 返回初始界面：回到开始画面，世界与角色全部重置。 */
   backToStart() {
+    if (this.started) audio.clickBack(); // 返回按钮点击音
+    audio.startMusic(); // 音乐停了（如被击败淡出）则在标题画面重新响起
     this.over = false;
     this.started = false;
     // 若仍处于鼠标锁定（异常路径直接返回标题），先解除，避免开始按钮点不到
@@ -538,6 +554,9 @@ export class Game {
 
   /** 按挡位设置场上之灵目标数量。 */
   _updateSpiritTargets() {
+    if (this._tierMem === undefined) this._tierMem = this.tier;
+    if (this.tier > this._tierMem) audio.levelUp(); // 升级音
+    this._tierMem = this.tier;
     const t = Game.TIERS[this.tier - 1];
     this.spirits.setNormalTarget(t.normal);
     this.spirits.setSpecialTarget(t.special);
@@ -587,6 +606,7 @@ export class Game {
     if (!ELEMENTS.includes(element)) return;
     if (element !== this.element) {
       this.element = element;
+      audio.switch(); // 技能切换音
       this.player.setElement(ELEMENT_INFO[element].accent);
       this.hud.setActive(element);
       this.hud.showToast(`已选择 ${ELEMENT_INFO[element].label} — 按住右键瞄准，松开释放`);
@@ -623,9 +643,11 @@ export class Game {
     // 全场地特效：从落点炸开染色浪潮与地裂，全屏闪光强化冲击感
     this.groundFx.burst(point, accent);
     this.hud.castFlash(accent);
+    audio.impact(element); // 三系技能各有打击音
 
     // 之灵判定：普通之灵 +10；对应元素清除特殊之灵 +30
     const result = this.spirits.collectAt(point, radius, element, this.world.current);
+    if (result.special > 0) audio.specialKill(); // 特殊之灵击败音
     const gained = result.normal * 10 + result.special * 30;
     if (gained > 0) {
       this.score += gained;
@@ -642,11 +664,15 @@ export class Game {
   /** 普通攻击路径命中：普通之灵直接收集；特殊之灵在同色领域内累积伤害（每次攻击同一之灵只算一次）。 */
   _basicPathHit(pos, hitSet) {
     const result = this.spirits.collectAt(pos, 1.0, 'basic', this.world.current, hitSet);
+    if (result.specialHit > 0) audio.specialHit(); // 打在特殊之灵上：金属撞击反馈
+    else if (result.immune > 0) audio.deflect();   // 属性不符：被弹开的钝声
     if (result.normal > 0) {
+      audio.hit(); // 命中反馈音
       this.score += result.normal * 10;
       this.hud.setScore(this.score);
     }
     if (result.special > 0) {
+      audio.specialKill(); // 特殊之灵击败音
       this.score += result.special * 30;
       this.hud.setScore(this.score);
       this._updateSpiritTargets();
@@ -658,11 +684,15 @@ export class Game {
   /** 普通攻击落点爆发。 */
   _basicImpact(point, radius = 1.6, hitSet) {
     const result = this.spirits.collectAt(point, radius, 'basic', this.world.current, hitSet);
+    if (result.specialHit > 0) audio.specialHit(); // 打在特殊之灵上：金属撞击反馈
+    else if (result.immune > 0) audio.deflect();   // 属性不符：被弹开的钝声
     if (result.normal > 0) {
+      audio.hit(); // 命中反馈音
       this.score += result.normal * 10;
       this.hud.setScore(this.score);
     }
     if (result.special > 0) {
+      audio.specialKill(); // 特殊之灵击败音
       this.score += result.special * 30;
       this.hud.setScore(this.score);
       this._updateSpiritTargets();
@@ -813,7 +843,10 @@ export class Game {
     const flying = canFly && !this._attacking && !this._aiming && !this.over;
     if (flying) {
       this.stamina = Math.max(0, this.stamina - (dt / STAMINA_DRAIN_TIME) * 100);
-      if (this.stamina <= 0) this._exhausted = true;
+      if (this.stamina <= 0) {
+        if (!this._exhausted) audio.staminaOut(); // 体力耗尽音
+        this._exhausted = true;
+      }
     } else if (this.stamina < 100) {
       this.stamina = Math.min(100, this.stamina + (dt / STAMINA_REGEN_TIME) * 100);
       if (this._exhausted && this.stamina >= STAMINA_REFLY) this._exhausted = false;
@@ -869,6 +902,11 @@ export class Game {
 
     // 瞄准环跟随 + 呼吸；只按住右键时才显示落点指示，平时完全隐藏
     const aiming = this._aiming;
+    // 按住右键未松手：瞄准节拍提示音
+    if (aiming && this.elapsed - (this._aimTickT ?? 0) > 0.45) {
+      this._aimTickT = this.elapsed;
+      audio.aimPulse();
+    }
     const accent = ELEMENT_INFO[this.element].accent;
     this.reticle.visible = aiming;
     this.reticle.position.set(this.aimPoint.x, 0.03 + Math.sin(this.elapsed * 4) * 0.012, this.aimPoint.z);
@@ -938,7 +976,11 @@ export class Game {
 
     for (const element of ELEMENTS) {
       const remaining = this.cooldowns.get(element) ?? 0;
-      if (remaining > 0) this.cooldowns.set(element, Math.max(0, remaining - dt));
+      if (remaining > 0) {
+        const next = Math.max(0, remaining - dt);
+        this.cooldowns.set(element, next);
+        if (next === 0) audio.cdReady(); // 冷却恢复提示音
+      }
       this.hud.setCooldown(element, this.cooldowns.get(element) ?? 0, COOLDOWNS[element]);
     }
 
