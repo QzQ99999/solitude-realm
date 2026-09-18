@@ -4,14 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>孤独领域 · Solitude Realm</title>
-  <script type="module" crossorigin src="./assets/index-CcIOLO5D.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CAOSQkqZ.css">
+  <script type="module" crossorigin src="./assets/index-Bjxfdhuf.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BP83PLtT.css">
 </head>
 <body>
   <canvas id="app"></canvas>
 
+  <canvas id="app"></canvas>
+
   <div id="vignette"></div>
   <div id="castFlash"></div>
+  <div id="gothicFrame" aria-hidden="true"></div>
   <div id="testOut" style="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);font-size:14px;color:#ffd27a;z-index:30;pointer-events:none;text-shadow:0 1px 4px #000"></div>
 
   <div id="gameOverScreen" class="is-hidden">
@@ -49,10 +52,12 @@
   </div>
 
   <div id="startScreen">
+    <div class="orn" aria-hidden="true"></div>
     <h1>孤独领域</h1>
-    <p class="sub">Solitude Realm · 元素竞技场</p>
+    <p class="sub">SOLITUDE REALM · 元素竞技场</p>
     <button id="startBtn" disabled>场景装载中…</button>
     <p class="tips">WASD 移动 · Q/E/R 技能 · 左键普攻 · 右键技能 · Shift 飞行 · H 查看</p>
+    <div class="orn flip" aria-hidden="true"></div>
     <p class="tips" style="opacity:0.45">build 0917-A · 孤独领域版</p>
   </div>
 
@@ -115,21 +120,53 @@
         <i class="skill__cd"></i>
         <b class="skill__cd-num"></b>
         <em class="skill__key">Q</em>
-        <span class="skill__glyph">❄</span>
+        <span class="skill__glyph">
+          <!-- 霜新星：六棱冰晶纹章 -->
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <path d="M24 5v38M6.5 14.5l35 19M41.5 14.5l-35 19"/>
+              <path d="M24 5l-4 4.6M24 5l4 4.6M24 43l-4-4.6M24 43l4-4.6"/>
+              <path d="M6.5 14.5l5.8-.8M6.5 14.5l.8 5.8M41.5 14.5l-5.8-.8M41.5 14.5l-.8 5.8"/>
+              <path d="M6.5 33.5l.8-5.8M6.5 33.5l5.8.8M41.5 33.5l-.8-5.8M41.5 33.5l-5.8.8"/>
+            </g>
+            <rect x="20.6" y="20.6" width="6.8" height="6.8" transform="rotate(45 24 24)" fill="currentColor" stroke="none"/>
+          </svg>
+        </span>
         <span class="skill__name">霜新星</span>
       </div>
       <div class="skill" data-element="fire" style="--accent:#ff8a3c">
         <i class="skill__cd"></i>
         <b class="skill__cd-num"></b>
         <em class="skill__key">E</em>
-        <span class="skill__glyph">🔥</span>
+        <span class="skill__glyph">
+          <!-- 落炎陨石：坠星纹章 -->
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <g stroke="currentColor" stroke-linecap="round" fill="none">
+              <path d="M42 6L22 26" stroke-width="2.6"/>
+              <path d="M38.5 4.5L19 24" stroke-width="1.1"/>
+              <path d="M43.5 10.5L26 28" stroke-width="1.1"/>
+            </g>
+            <circle cx="17.5" cy="30.5" r="7.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <circle cx="17.5" cy="30.5" r="3" fill="currentColor" stroke="none"/>
+            <g stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none">
+              <path d="M8.5 39.5l-3.4 3.4M6.5 31l-3.4 1M11.5 43.5l-1 3.4"/>
+            </g>
+          </svg>
+        </span>
         <span class="skill__name">落炎陨石</span>
       </div>
       <div class="skill" data-element="storm" style="--accent:#a98bff">
         <i class="skill__cd"></i>
         <b class="skill__cd-num"></b>
         <em class="skill__key">R</em>
-        <span class="skill__glyph">⚡</span>
+        <span class="skill__glyph">
+          <!-- 天雷殛灭：雷鞭纹章 -->
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <path d="M28.5 4L13 26.5h9.5L17 44l18.5-24.5h-10L30.5 4z"
+                  fill="currentColor" stroke="#0a0c10" stroke-width="1.2" stroke-linejoin="round"/>
+            <path d="M33 8l-7 12.5" stroke="#0a0c10" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+          </svg>
+        </span>
         <span class="skill__name">天雷殛灭</span>
       </div>
     </div>
