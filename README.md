@@ -40,12 +40,15 @@ npm run dev        # http://127.0.0.1:5180
   （`public/sfx/`，来自 [Mixkit](https://mixkit.co)，Mixkit 免费许可：
   可商用、无需署名；采样加载失败自动回退纯合成）
 - 动态分辨率控制器：帧率不足自动下调渲染像素比，稳住高帧率
-- 全部角色 / 之灵 / 特效均由基础几何体 + 着色器程序化生成
+- 玩家角色：蒙皮 GLB 模型 + Mixamo 动作组（待机/跑动/瞄准步法/放箭），
+  武器为程序化长弓（绑定左手骨骼，宝石随元素换色）；
+  之灵 / 特效仍由基础几何体 + 着色器程序化生成
 
 ## 目录结构
 
 ```
 public/arena.glb    竞技场场景（Blender 导出，42MB，Draco 压缩）
+public/character/   玩家角色模型与动作（FBX 原件不入库，glb/ 为运行时资源）
 public/draco/       Draco 解码器
 src/arena.js        场景加载与网格合并
 src/game.js         游戏主循环 / 输入 / 相机

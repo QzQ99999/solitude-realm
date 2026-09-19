@@ -110,7 +110,7 @@ export class Game {
     });
 
     /* ---- 相机轨道 ---- */
-    this.orbit = { yaw: Math.PI * 0.25, pitch: 0.62, dist: 24 };
+    this.orbit = { yaw: Math.PI * 0.25, pitch: 0.56, dist: 9.5 }; // 初始镜头：距离近、高度适中
 
     /* ---- 指针与瞄准 ---- */
     this.pointer = new THREE.Vector2(0, 0);
@@ -295,7 +295,7 @@ export class Game {
     });
 
     // 按住右键：显示技能落点指示；松开右键：在落点释放当前选中的技能。
-    // 按住左键：普通攻击——固定视角，显示能量球落点并持续发射；松开停止。
+    // 按住左键：普通攻击——固定视角，显示元素箭落点并持续发射；松开停止。
     // 未锁定时的左键只用于进入指针锁定。
     // 每次按下都把落点重置回角色身边（原点 = 人物位置），再由拖动拉远。
     this.canvas.addEventListener('pointerdown', (event) => {
@@ -869,7 +869,7 @@ export class Game {
     this._updateAim();
     // 开始前的电影式缓慢环视
     if (!this.started) this.orbit.yaw += dt * 0.06;
-    this.player.update(dt, move.lengthSq() > 0 ? move : null, this.aimPoint, this.elapsed, flying);
+    this.player.update(dt, move.lengthSq() > 0 ? move : null, this.aimPoint, this.elapsed, flying, this._aiming || this._attacking);
     this.player.updateShield(this.elapsed, this._invulnT, dt);
     // 飞行拖尾光带：只在飞行时采样轨迹，松开 Shift 后自然消散
     this.flightTrail.update(dt, flying ? this.player.root.position : null, ELEMENT_INFO[this.element].accent);
@@ -940,13 +940,13 @@ export class Game {
     this.aimLine.rotation.y = -Math.atan2(adz, adx);
     this.aimLine.scale.set(adist, 1, 1);
 
-    // 普通攻击：按住左键时，能量球落点指示亮起并持续发射
+    // 普通攻击：按住左键时，元素箭落点指示亮起并持续发射
     if (this._attacking) {
       this._basicT -= dt;
       if (this._basicT <= 0) {
         this._basicT = 0.32;
         const accent = ELEMENT_INFO[this.element].accent;
-        audio.shoot(); // 每颗能量球的射击音
+        audio.shoot(); // 每支元素箭的射击音
         this.player.playCast();
         this.player.getOrbWorldPosition(this._orbPos);
         this.spells.castBasic(

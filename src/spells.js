@@ -7,7 +7,6 @@ import { createAsteroidGeometry } from './vfx/ProceduralGeometry.js';
 import { createBoltRibbonGeometry } from './vfx/ProceduralGeometry.js';
 import { createIceMaterial } from './vfx/IceMaterial.js';
 import { createMeteorMaterial } from './vfx/MeteorMaterial.js';
-import { createOrbMaterial } from './vfx/OrbMaterial.js';
 import { createLightningMaterial, BoltPass, thunderConfig } from './vfx/LightningMaterial.js';
 import { BurstMode, DecalType } from './vfx/VFXSystem.js';
 
@@ -15,7 +14,7 @@ import { BurstMode, DecalType } from './vfx/VFXSystem.js';
  * spells.js — 三系法术与普通攻击，全部特效移植自 elemental-sandbox
  * （MIT）：https://genex.games/elemental-sandbox · github.com/achrefelouafi/LinearAbiltyCastingThreeJS
  *
- *  - 普通攻击：噪声啃噬的蓄能球（沙盒 BEAM 蓄能球材质）+ 速度拉伸火花拖尾；
+ *  - 普通攻击：元素箭（发光箭体 + 交叉箭羽 + 火花拖尾，随当前元素染色）；
  *  - Q 霜新星：程序化冰晶破土喷发（沙盒晶体几何 + 冰材质，弹性过冲起落），
  *    冻结水汽壳爆裂 + 成片外扩的地面霜；
  *  - E 落炎陨石：fbm 团块 + 平面切割 + 陨石坑的程序化石球（沙盒陨石材质，
@@ -33,6 +32,31 @@ const ORB_PALETTES = {
   fire: { core: '#ffffff', inner: '#ffe8c0', outer: '#ff8a3c' },
   storm: { core: '#ffffff', inner: '#e7dcff', outer: '#a98bff' }
 };
+
+/** 元素箭：+Z 为箭头方向（配合 group.lookAt 让箭头指向飞行方向）。
+ *  箭杆 + 三棱锥箭头 + 两片交叉箭羽，整支随元素色发光。 */
+function buildArrow(material) {
+  const arrow = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 8), material);
+  shaft.rotation.x = Math.PI / 2; // 圆柱轴向 Y → Z
+  arrow.add(shaft);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.24, 8), material);
+  head.rotation.x = Math.PI / 2; // 锥尖朝 +Z
+  head.position.z = 0.54;
+  arrow.add(head);
+  const fletchGeometry = new THREE.PlaneGeometry(0.18, 0.24);
+  fletchGeometry.rotateY(Math.PI / 2); // 竖起为包含箭杆轴（Z）的平面
+  const fletchMaterial = new THREE.MeshBasicMaterial({
+    color: '#ffffff', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false
+  });
+  for (const rot of [Math.PI / 4, -Math.PI / 4]) {
+    const fin = new THREE.Mesh(fletchGeometry, fletchMaterial);
+    fin.position.z = -0.36;
+    fin.rotation.z = rot; // 两片箭羽交叉
+    arrow.add(fin);
+  }
+  return arrow;
+}
 
 /* ---------------------------------------------------------------------- */
 /* 一次性粒子雨（CPU 积分，飞行轨迹等少量环境粒子继续用它）                  */
@@ -663,9 +687,8 @@ export class SpellManager {
     this._boltLight = new THREE.PointLight('#c9b8ff', 0, 30, 2);
     scene.add(this._boltLight);
 
-    /* -- 普通攻击：沙盒蓄能球（噪声啃噬的能量弹）池 -- */
+    /* -- 普通攻击：元素箭池 -- */
     this._balls = [];
-    const orbGeometry = new THREE.IcosahedronGeometry(1, 3);
     const haloCanvas = document.createElement('canvas');
     haloCanvas.width = haloCanvas.height = 64;
     const haloCtx = haloCanvas.getContext('2d');
@@ -678,21 +701,21 @@ export class SpellManager {
     this._ballHaloTexture = new THREE.CanvasTexture(haloCanvas);
     for (let i = 0; i < 8; i++) {
       const group = new THREE.Group();
-      const orb = new THREE.Mesh(orbGeometry, createOrbMaterial({
-        core: '#ffffff', inner: '#d3f4ff', outer: '#56d8ff', glow: 2.8
-      }));
-      orb.scale.setScalar(0.2);
-      orb.renderOrder = 20; // 地面贴花之上，避免霜面/焦痕盖住能量球
+      const arrowMaterial = new THREE.MeshStandardMaterial({
+        color: '#ffffff', emissive: '#9fd8ff', emissiveIntensity: 2.6,
+        roughness: 0.4, metalness: 0.2, toneMapped: false
+      });
+      const arrow = buildArrow(arrowMaterial);
       const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: this._ballHaloTexture, color: '#9fd8ff', transparent: true, opacity: 0.75,
+        map: this._ballHaloTexture, color: '#9fd8ff', transparent: true, opacity: 0.85,
         blending: THREE.AdditiveBlending, depthWrite: false
       }));
-      halo.scale.setScalar(1.6);
+      halo.scale.setScalar(1.5);
       halo.renderOrder = 20;
-      group.add(orb, halo);
+      group.add(arrow, halo);
       group.visible = false;
       scene.add(group);
-      this._balls.push({ group, orb, halo, busy: false });
+      this._balls.push({ group, arrow, arrowMaterial, halo, busy: false });
     }
 
     this._active = [];
@@ -709,15 +732,20 @@ export class SpellManager {
   }
 
   /**
-   * 普通攻击：从 `from`（杖头宝珠）向 `to` 发射一颗元素蓄能球。
-   * `onMove(pos)` 每帧回调球体当前位置（用于路径命中判定）；
-   * `onImpact(point)` 在球落地时回调一次。
+   * 普通攻击：从 `from`（弓的搭箭点）向 `to` 射出一支元素箭。
+   * `onMove(pos)` 每帧回调箭的当前位置（用于路径命中判定）；
+   * `onImpact(point)` 在箭落地时回调一次。
    */
   castBasic(from, to, color, onMove, onImpact) {
     const slot = this._balls.find((ball) => !ball.busy) ?? this._balls[0];
     slot.busy = true;
     slot.group.visible = true;
     slot.group.position.copy(from);
+    slot.group.lookAt(to); // 箭头 +Z 指向飞行方向
+    // 整支箭染成当前元素色
+    slot.arrowMaterial.emissive.set(color);
+    slot.arrowMaterial.color.set('#ffffff').lerp(new THREE.Color(color), 0.45);
+    slot.halo.material.color.set(color);
     this._active.push({
       type: 'basic',
       t: 0,
@@ -765,10 +793,9 @@ export class SpellManager {
     e.time = frame.uTime.value;
     vfx.sparks.emit(3, e);
 
-    // 呼吸脉动，远看也醒目
-    state.slot.orb.scale.setScalar(0.2 * (1.1 + 0.18 * Math.sin(state.t * 34)));
-    state.slot.orb.material.uniforms.uCharge.value = 1;
-    state.slot.halo.material.color.set(state.color);
+    // 箭体绕轴自旋 + 光晕呼吸，远看也醒目
+    state.slot.arrow.rotation.z += dt * 22;
+    state.slot.halo.material.opacity = 0.75 + 0.25 * Math.sin(state.t * 34);
     if (k >= 1 && !state.fired) {
       state.fired = true;
       state.slot.group.visible = false;
