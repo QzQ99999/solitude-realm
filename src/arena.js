@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BOUNDARY_RADIUS } from './player.js';
+import { patchMarble } from './arenaMarble.js';
 
 /**
  * arena.js — 黑剑 BOSS 战场景（孤独领域）。
@@ -167,7 +168,10 @@ export function loadArena(scene, onReady, onProgress) {
       // 性能优化：静态网格按材质合并，draw call 从数百降到几十
       const merged = mergeArena(model);
       window.__arenaMerge = mergeArena.stats; // 供控制台检查合并结果
-      for (const mesh of merged) model.add(mesh);
+      for (const mesh of merged) {
+        patchMarble(mesh.material); // 白底材质注入大理石/岩石质感
+        model.add(mesh);
+      }
       scene.add(model);
       onReady?.(true);
     },

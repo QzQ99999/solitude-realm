@@ -203,6 +203,20 @@ export class World {
     }
   }
 
+  /**
+   * 领域颜色软化：向亮度轴去饱和并压暗。
+   */
+  static SOFTEN_DESAT = 0.42;
+  static SOFTEN_DIM = 0.8;
+  _soften(c) {
+    const lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+    c.r += (lum - c.r) * World.SOFTEN_DESAT;
+    c.g += (lum - c.g) * World.SOFTEN_DESAT;
+    c.b += (lum - c.b) * World.SOFTEN_DESAT;
+    c.multiplyScalar(World.SOFTEN_DIM);
+    return c;
+  }
+
   _tickShift(dt, vignette) {
     if (this._progress >= 1) return;
 
@@ -210,14 +224,22 @@ export class World {
     // 平滑进出
     const k = this._progress * this._progress * (3 - 2 * this._progress);
 
+    // 非荒原领域：主题颜色/灯光统一软化（用户反馈：施法后地形过艳过亮）
+    const soften = this.current !== 'neutral';
     for (const field of THEME_COLOR_FIELDS) {
       this._cA.copy(this._from[field]);
       this._cB.set(this._to[field]);
       this._cA.lerp(this._cB, k);
+      if (soften) this._soften(this._cA);
       this._apply(field, this._cA);
     }
     for (const field of THEME_FLOAT_FIELDS) {
-      this._apply(field, this._from[field] + (this._to[field] - this._from[field]) * k);
+      let value = this._from[field] + (this._to[field] - this._from[field]) * k;
+      if (soften) {
+        if (field === 'keyIntensity' || field === 'hemiIntensity') value *= 0.75;
+        else if (field === 'veinStrength') value *= 0.5;
+      }
+      this._apply(field, value);
     }
 
     // 暗角颜色随主题走（DOM box-shadow，CSS transition 自带平滑）

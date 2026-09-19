@@ -1,7 +1,96 @@
 import * as THREE from 'three';
+import { noiseGLSL } from './vfx/NoiseGLSL.js';
+import { commonGLSL } from './vfx/CommonGLSL.js';
 
 /** 场地半径：玩家活动范围被限制在这个圆内（edge.js 的边界环与之共用）。 */
 export const BOUNDARY_RADIUS = 58;
+
+/**
+ * 风系护盾着色器：一层旋绕的气流球壳。
+ *
+ * 菲涅尔边缘 + 绕球面流动的风纹（脊状噪声沿切向拉伸、随时间旋转），
+ * 消散时按噪声阈值溶解成片剥落、边缘发亮，同时球体膨胀变淡。
+ */
+const SHIELD_VERTEX = /* glsl */ `
+  uniform float uTime;
+  uniform float uSwelling;
+
+  varying vec3 vNormalW;
+  varying vec3 vViewDir;
+  varying vec3 vLocal;
+
+  ${noiseGLSL}
+
+  void main() {
+    vLocal = position;
+    // 呼吸式起伏：低频噪声沿法线轻推顶点
+    float n = snoise(normal * 1.8 + vec3(0.0, uTime * 0.5, 13.7)) * 0.06;
+    vec3 pos = position + normal * n * (1.0 + uSwelling);
+    vec4 world = modelMatrix * vec4(pos, 1.0);
+    vNormalW = normalize(mat3(modelMatrix) * normal);
+    vViewDir = cameraPosition - world.xyz;
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+
+const SHIELD_FRAGMENT = /* glsl */ `
+  uniform float uTime;
+  uniform float uFade;      // 常规透明度（脉动 + 到期渐隐）
+  uniform float uDissolve;  // 0=完好 1=完全消散
+  uniform float uSwelling;
+  uniform vec3  uColorA;    // 气流基色
+  uniform vec3  uColorB;    // 高光色
+
+  varying vec3 vNormalW;
+  varying vec3 vViewDir;
+  varying vec3 vLocal;
+
+  ${noiseGLSL}
+  ${commonGLSL}
+
+  void main() {
+    vec3 N = normalize(vNormalW);
+    vec3 V = normalize(vViewDir);
+    float ndv = clamp(dot(N, V), 0.0, 1.0);
+    float fres = pow(1.0 - ndv, 2.0);
+
+    // 环球面流动的风纹：在切向系里采样脊状噪声，沿纬线方向拉长、随时间旋转
+    vec3 sp = vLocal * 2.6 + vec3(0.0, uTime * 0.35, 0.0);
+    float swirl = ridged(vec3(sp.x, sp.y * 0.6, sp.z) + vec3(uTime * 0.6, 0.0, 0.0), 4);
+    float streak = smoothstep(0.62, 0.96, swirl);
+
+    // 消散：噪声阈值溶解，剥落边缘发亮
+    vec2 dis = dissolveMask(fbm3(vLocal * 3.6 + vec3(uTime * 0.4)) * 0.5 + 0.5, uDissolve * 1.35 - 0.12, 0.14);
+
+    float alpha = (0.05 + fres * 0.55 + streak * 0.38) * uFade * dis.x;
+    if (alpha < 0.004) discard;
+
+    vec3 color = mix(uColorA, uColorB, clamp(streak + fres * 0.6, 0.0, 1.0));
+    color += uColorB * dis.y * 2.2; // 消散边缘的亮边
+    gl_FragColor = vec4(color * 1.4, alpha);
+  }
+`;
+
+function windShieldMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+    uniforms: {
+      uTime: { value: 0 },
+      uFade: { value: 1 },
+      uDissolve: { value: 0 },
+      uSwelling: { value: 0 },
+      uColorA: { value: new THREE.Color('#9fd8ff') },
+      uColorB: { value: new THREE.Color('#ffffff') }
+    },
+    vertexShader: SHIELD_VERTEX,
+    fragmentShader: SHIELD_FRAGMENT
+  });
+}
 
 /**
  * player.js — 玩家角色：一名持杖的元素使。
@@ -58,7 +147,7 @@ export class Player {
     eyeR.position.set(0.07, 0.14, 0.26);
     this.head.add(eyeL, eyeR);
 
-    // 法杖：杖身 + 杖头宝珠 + 宝珠光
+    // 法杖：杖身 + 杖头宝珠 + 宝珠光（最初的造型）
     this.staff = new THREE.Group();
     const rod = new THREE.Mesh(
       new THREE.CylinderGeometry(0.035, 0.05, 1.85, 6),
@@ -73,6 +162,7 @@ export class Player {
     });
     this.orb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 12), this._orbMaterial);
     this.orb.position.y = 1.95;
+    this.orb.renderOrder = 20; // 在地面贴花之后绘制，避免贴花盖住宝珠
     this.orbLight = new THREE.PointLight('#9fd8ff', 6, 7, 2);
     this.orbLight.position.y = 1.95;
     this.staff.add(rod, this.orb, this.orbLight);
@@ -102,20 +192,14 @@ export class Player {
     this.hoverGlow.rotation.x = -Math.PI / 2;
     scene.add(this.hoverGlow);
 
-    // 受击无敌帧的球型护盾：半透明能量泡，脉动闪烁，临到期渐隐
-    this.shield = new THREE.Mesh(
-      new THREE.SphereGeometry(1.35, 28, 20),
-      new THREE.MeshBasicMaterial({
-        color: '#7fd8ff',
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide
-      })
-    );
+    // 受击无敌帧的风系护盾：旋绕气流球壳，到期时溶解消散
+    this.shield = new THREE.Mesh(new THREE.SphereGeometry(1.35, 40, 26), windShieldMaterial());
     this.shield.visible = false;
+    this.shield.renderOrder = 20; // 地面贴花之上
     scene.add(this.shield);
+    this._shieldShown = false;   // 上一帧护盾是否可见
+    this._dissolveT = 1;         // 消散动画进度（1 = 结束）
+    this._dissolveFrom = new THREE.Vector3();
 
     this.body.add(this.robe, collar, this.head, this.staff);
 
@@ -139,20 +223,61 @@ export class Player {
   }
 
   /**
-   * 无敌帧护盾：invulnT > 0 时显示球型能量泡。
-   * 脉动闪烁表示生效中，最后 0.35 秒渐隐退出。
+   * 无敌帧风系护盾：invulnT > 0 时罩住玩家的旋绕气流球。
+   *
+   * 罩上瞬间从 0.6 倍弹开，生效期间风纹旋转 + 轻微脉动；
+   * 到期（invulnT 归零）后不再直接隐藏，而是播放 0.45 秒消散：
+   * 球体膨胀、按噪声阈值溶解成片剥落、剥落边缘发亮，最后散尽。
+   *
+   * @param {number} elapsed 全局时间
+   * @param {number} invulnT 剩余无敌帧
+   * @param {number} [dt] 帧间隔（消散动画需要）
    */
-  updateShield(elapsed, invulnT) {
-    if (invulnT <= 0) {
-      this.shield.visible = false;
+  updateShield(elapsed, invulnT, dt = 1 / 60) {
+    const u = this.shield.material.uniforms;
+    u.uTime.value = elapsed;
+
+    /* —— 到期检测：上一帧还可见、这一帧无敌帧结束 → 开始消散 —— */
+    if (this._shieldShown && invulnT <= 0) {
+      this._shieldShown = false;
+      this._dissolveT = 0;
+      this._dissolveFrom.copy(this.shield.position);
+    }
+
+    /* —— 消散动画 —— */
+    if (this._dissolveT < 1) {
+      this._dissolveT = Math.min(1, this._dissolveT + dt / 0.45);
+      const k = this._dissolveT;
+      this.shield.visible = true;
+      this.shield.position.copy(this._dissolveFrom);
+      this.shield.scale.setScalar(1 + k * 0.65);
+      u.uDissolve.value = k;
+      u.uFade.value = (1 - k) * 0.9;
+      u.uSwelling.value = k;
+      if (k >= 1) this.shield.visible = false;
       return;
     }
+
+    if (invulnT <= 0) {
+      this.shield.visible = false;
+      this._shieldShown = false;
+      return;
+    }
+
+    /* —— 生效中：罩上弹开 + 风纹旋转 + 临到期渐隐 —— */
+    if (!this._shieldShown) {
+      this._shieldShown = true;
+      this.shield.scale.setScalar(0.6); // 罩上瞬间从 0.6 弹开
+    }
+    const scale = this.shield.scale.x + (1 - this.shield.scale.x) * Math.min(1, dt * 10);
     this.shield.visible = true;
     this.shield.position.set(this.position.x, 1.05, this.position.z);
     const fadeOut = Math.min(1, invulnT / 0.35); // 临到期渐隐
-    const flicker = 0.72 + 0.28 * Math.sin(elapsed * 18); // 高频脉动
-    this.shield.material.opacity = 0.26 * fadeOut * flicker;
-    this.shield.scale.setScalar(1 + 0.04 * Math.sin(elapsed * 14));
+    const flicker = 0.78 + 0.22 * Math.sin(elapsed * 16);
+    u.uFade.value = 0.9 * fadeOut * flicker;
+    u.uDissolve.value = 0;
+    u.uSwelling.value = 0;
+    this.shield.scale.setScalar(scale * (1 + 0.03 * Math.sin(elapsed * 11)));
   }
 
   /** 法杖宝珠的世界坐标（能量球发射点）。 */

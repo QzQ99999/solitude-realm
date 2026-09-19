@@ -113,8 +113,16 @@ export class GroundFX {
           /* —— 落点闪光 —— */
           float flash = uPulse * exp(-d * 0.22) * 0.75;
 
-          vec3 col = uColor * (lip * 1.15 + burstWash + cracks * crackMask * 1.7
-                               + realmGlow + flash);
+          /* 大面积染色洗色：去饱和 65% + 减亮（纹理特效除外）。
+           * 染色浪潮/领域残辉/落点闪光这类"面"上的洗色按比例收敛；
+           * 地裂纹理（cracks）保持原有饱和度与亮度。 */
+          float washLum = dot(uColor, vec3(0.299, 0.587, 0.114));
+          vec3 washColor = mix(uColor, vec3(washLum), 0.65);
+
+          vec3 col = washColor * (lip * 0.75 + burstWash * 0.35
+                               + realmGlow * 0.35 + flash * 0.55);
+          /* 地裂纹理特效：保持原有饱和度与亮度 */
+          col += uColor * (cracks * crackMask * 1.7);
           float a = clamp(max(col.r, max(col.g, col.b)), 0.0, 1.0);
           if (a < 0.004) discard;
           gl_FragColor = vec4(col, 1.0);

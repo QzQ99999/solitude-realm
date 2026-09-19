@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { ELEMENT_INFO } from './themes.js';
 import { audio } from './audio.js';
+import { createBeamMaterial, BeamPass, beamConfig } from './vfx/BeamMaterial.js';
+import { createBeamTubeGeometry } from './vfx/ProceduralGeometry.js';
+import { createOrbMaterial } from './vfx/OrbMaterial.js';
 
 const SPIRIT_COUNT = 12; // 之灵池容量：随分数增长最多同时 12 颗在场
 const AREA = 40;
-const _LASER_X_AXIS = new THREE.Vector3(1, 0, 0); // 激光网格的基准朝向
-const _LASER_TMP = new THREE.Vector3();
-const _LASER_NEG_Y = new THREE.Vector3(0, -1, 0); // 锥形光束的窄端朝向
 
 /* 追逐参数：生成后永远追逐玩家，速度比步行(6.2)快、比飞行(17)慢。 */
 const CHASE_SPEED = 7.2;
@@ -41,10 +41,15 @@ function randomSpecialInterval() {
  * 重生逻辑不变；被法术命中时炸成一蓬粒子、加分，然后在别处重生。
  */
 export class SpiritField {
-  constructor(scene, bursts) {
+  constructor(scene, bursts, vfx) {
     this.scene = scene;
     this.bursts = bursts;
+    this.vfx = vfx;
     this.onCollect = null;
+
+    // LV.5+ 激光共享的参数空间管几何（沙盒光束：一根管服务任意长度）
+    this._laserTubeGeo = createBeamTubeGeometry(48, 18);
+    this._laserOrbGeo = new THREE.IcosahedronGeometry(1, 3);
 
     // 光晕贴图（canvas 径向渐变）
     const canvas = document.createElement('canvas');
@@ -189,32 +194,49 @@ export class SpiritField {
       group.visible = false;
       this._group.add(group);
 
-      // LV.5+ 激光：预警线（闪烁）与射击光束各一条，平时隐藏
-      const laserTele = new THREE.Mesh(
-        new THREE.BoxGeometry(1, 0.07, 0.07),
-        new THREE.MeshBasicMaterial({
-          color: '#9fd8ff', transparent: true, opacity: 0,
-          blending: THREE.AdditiveBlending, depthWrite: false
-        })
+      // LV.5+ 激光：沙盒参数化光束（HALO 大气 / SHELL 空心鞘 / CORE 白热芯）
+      // 三层管叠画 + 云端式蓄能球，平时隐藏
+      const laserConfig = beamConfig({
+        radius: 0.16,
+        radiusNear: 0.06,
+        radiusCurve: 1.0,
+        flare: 0,
+        flareWidth: 0.05,
+        coreWidth: 0.3,
+        shellWidth: 1.0,
+        haloWidth: 2.6,
+        shellOpacity: 1.4,
+        haloOpacity: 0.4,
+        // 沙盒出厂值配 HDR 后期；本作无后期，亮度倍率相应提高
+        opacity: 1.8,
+        glow: 1.8,
+        ripple: 0.3,
+        streak: 1.0,
+        flowSpeed: 9,
+        tipGlow: 1.6,
+        mouthGlow: 0.8,
+        wander: 0.05
+      });
+      const laserMeshes = [];
+      const laserMaterials = [];
+      for (const pass of [BeamPass.HALO, BeamPass.SHELL, BeamPass.CORE]) {
+        const material = createBeamMaterial(pass, laserConfig);
+        const mesh = new THREE.Mesh(this._laserTubeGeo, material);
+        mesh.frustumCulled = false;
+        mesh.matrixAutoUpdate = false;
+        mesh.renderOrder = 11 + (BeamPass.CORE - pass); // 芯最后画
+        mesh.visible = false;
+        this._group.add(mesh);
+        laserMeshes.push(mesh);
+        laserMaterials.push(material);
+      }
+      const laserOrb = new THREE.Mesh(
+        this._laserOrbGeo,
+        createOrbMaterial({ inner: '#d3f4ff', outer: '#9fd8ff', glow: 2.6 })
       );
-      const laserBeam = new THREE.Mesh(
-        new THREE.BoxGeometry(1, 0.35, 0.35),
-        new THREE.MeshBasicMaterial({
-          color: '#ffffff', transparent: true, opacity: 0,
-          blending: THREE.AdditiveBlending, depthWrite: false
-        })
-      );
-      const laserGlow = new THREE.Mesh(
-        new THREE.BoxGeometry(1, 0.9, 0.9),
-        new THREE.MeshBasicMaterial({
-          color: '#9fd8ff', transparent: true, opacity: 0,
-          blending: THREE.AdditiveBlending, depthWrite: false
-        })
-      );
-      laserTele.visible = false;
-      laserBeam.visible = false;
-      laserGlow.visible = false;
-      this._group.add(laserTele, laserBeam, laserGlow);
+      laserOrb.visible = false;
+      laserOrb.renderOrder = 9;
+      this._group.add(laserOrb);
       const slot = {
         group, core, crystal, ring, halo,
         alive: false,
@@ -225,11 +247,23 @@ export class SpiritField {
         flash: 0,
         basicHits: 0, // 同色领域内被普通攻击命中的次数（3 次清除）
         wander: new THREE.Vector3(),
-        laserTele,
-        laserBeam,
-        laserGlow,
+        laserMeshes,
+        laserMaterials,
+        laserConfig,
+        laserOrb,
+        laserState: {
+          origin: new THREE.Vector3(),
+          target: new THREE.Vector3(),
+          side: new THREE.Vector3(1, 0, 0),
+          progress: 0,
+          fade: 1,
+          widthFade: 1,
+          seed: 0,
+          coils: 0,
+          rings: 0
+        },
         laser: {
-          state: 'idle', // idle → tele（0.7s 闪烁预警）→ fire（0.22s）→ idle
+          state: 'idle', // idle → tele（1.0s 蓄能预警）→ fire（0.22s）→ idle
           t: 0,
           cd: 1.5 + Math.random() * 1.5,
           from: new THREE.Vector3(),
@@ -249,16 +283,34 @@ export class SpiritField {
     return Math.max(0.45, 2.2 - (this.laserTier - 5) * 0.35) * (0.8 + Math.random() * 0.4);
   }
 
-  /** 把预警线/光束网格摆到 from→dir 射线上：起点在 from，向 dir 延伸 len 长。 */
-  _placeBeam(mesh, from, dir, len, w) {
-    mesh.position.copy(from).addScaledVector(dir, len / 2);
-    mesh.scale.set(len, w, w);
-    mesh.quaternion.setFromUnitVectors(
-      _LASER_X_AXIS,
-      _LASER_TMP.copy(dir).normalize()
-    );
+  /** 收起一条激光的三层光束与蓄能球。 */
+  _hideLaser(slot) {
+    for (const mesh of slot.laserMeshes) mesh.visible = false;
+    slot.laserOrb.visible = false;
   }
 
+  /** 按之灵元素给激光与蓄能球换色。 */
+  _tintLaser(slot) {
+    const accent = SPECIAL_ACCENTS[slot.element] ?? ELEMENT_INFO[slot.element].accent;
+    const c = slot.laserConfig;
+    const col = new THREE.Color(accent);
+    c.colorCore = '#ffffff';
+    c.colorInner = '#' + col.clone().lerp(new THREE.Color('#ffffff'), 0.55).getHexString();
+    c.colorOuter = accent;
+    c.colorHalo = '#' + col.clone().multiplyScalar(0.28).getHexString();
+    slot.laserOrb.material.userData.setPalette({ inner: c.colorInner, outer: accent });
+  }
+
+  /** 把当前状态推进三层光束材质：从 from 沿 dir 画 len 长的束。 */
+  _syncLaser(slot, from, dir, len, progress, fade, widthFade) {
+    const s = slot.laserState;
+    s.origin.copy(from);
+    s.target.copy(from).addScaledVector(dir, len);
+    s.progress = progress;
+    s.fade = fade;
+    s.widthFade = widthFade;
+    for (const material of slot.laserMaterials) material.userData.sync(s);
+  }
 
   _updateLaser(slot, dt, playerPos) {
     const L = slot.laser;
@@ -268,18 +320,14 @@ export class SpiritField {
       if (L.state !== 'idle') {
         L.state = 'idle';
         L.cd = this._laserCd();
-        slot.laserTele.visible = false;
-        slot.laserBeam.visible = false;
-        slot.laserGlow.visible = false;
+        this._hideLaser(slot);
       }
       return;
     }
 
     switch (L.state) {
       case 'idle': {
-        slot.laserTele.visible = false;
-        slot.laserBeam.visible = false;
-        slot.laserGlow.visible = false;
+        this._hideLaser(slot);
         L.cd -= dt;
         if (L.cd <= 0) {
           // 锁定玩家当前位置：激光从特殊之灵体内单方向射向该点，到点为止
@@ -291,13 +339,7 @@ export class SpiritField {
             L.state = 'tele';
             L.t = 0;
             L.hitDone = false;
-            slot.laserTele.material.color.set(
-              SPECIAL_ACCENTS[slot.element] ?? ELEMENT_INFO[slot.element].accent
-            );
-            slot.laserGlow.material.color.set(
-              SPECIAL_ACCENTS[slot.element] ?? ELEMENT_INFO[slot.element].accent
-            );
-            slot.laserTele.visible = true;
+            this._tintLaser(slot);
             audio.laserCharge(); // 蓄能预警音
           } else {
             L.cd = 0.5; // 离玩家太近不射，稍后再试
@@ -306,23 +348,23 @@ export class SpiritField {
         break;
       }
       case 'tele': {
-        // 起点始终跟随特殊之灵当前位置：预警线从之灵体内射向地图外，不穿过之灵反侧
+        // 起点始终跟随特殊之灵当前位置：光束从之灵体内射向地图外，不穿过反侧
         L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
-        // 路径提示闪烁 1.0 秒，更亮更粗
-        slot.laserTele.material.opacity = 0.45 + 0.5 * Math.abs(Math.sin(L.t * 12));
-        this._placeBeam(slot.laserTele, L.from, L.dir, L.len + 170, 0.9);
+        // 蓄能段：只画出炮口附近一小截，闪烁提示弹道；蓄能球随之长大
+        const charge = Math.min(1, Math.max(0, L.t / 1.0));
+        this._syncLaser(slot, L.from, L.dir, L.len + 170, 0.055, 0.35 + 0.45 * Math.abs(Math.sin(L.t * 12)), 1);
+        for (const mesh of slot.laserMeshes) mesh.visible = true;
+        slot.laserOrb.visible = true;
+        slot.laserOrb.position.copy(L.from);
+        slot.laserOrb.scale.setScalar(0.26 + charge * 0.34);
+        slot.laserOrb.material.uniforms.uCharge.value = charge;
         if (L.t >= 1.0) {
           L.state = 'fire';
           L.t = 0;
-          slot.laserTele.visible = false;
-          slot.laserBeam.visible = true;
-          slot.laserGlow.visible = true;
+          slot.laserOrb.visible = false;
           // 发射源迸光：强调激光从特殊之灵体内射出
-          this.bursts.emit({
-            pos: L.from, count: 16, speed: [2, 6], up: [0.5, 3], life: [0.2, 0.5],
-            size: [8, 20], colorA: '#ffffff',
-            colorB: SPECIAL_ACCENTS[slot.element] ?? ELEMENT_INFO[slot.element].accent,
-            gravity: -2, drag: 2, spread: 0.8
+          this.vfx?.sparkBurst(L.from, slot.element, {
+            count: 18, speed: 5, life: 0.5, size: 0.9, up: 0.6, radius: 0.3
           });
           audio.laserFire(); // 射击音
         }
@@ -330,12 +372,13 @@ export class SpiritField {
       }
       case 'fire': {
         const dur = 0.22;
-        // 起点跟随特殊之灵；锥形激光更细，单方向延伸出地图外
+        // 起点跟随特殊之灵；光束全弹道点亮，末段宽度和亮度一起收
         L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
-        this._placeBeam(slot.laserBeam, L.from, L.dir, L.len + 170, 0.35);
-        this._placeBeam(slot.laserGlow, L.from, L.dir, L.len + 170, 0.9);
-        slot.laserBeam.material.opacity = 1 - L.t / dur;
-        slot.laserGlow.material.opacity = 0.6 * (1 - L.t / dur);
+        const k = L.t / dur;
+        this._syncLaser(slot, L.from, L.dir, L.len + 170, 1, 1 - k, 1 - 0.45 * k);
+        // 蓄能球释放瞬间炸掉
+        slot.laserOrb.visible = k < 0.4;
+        slot.laserOrb.material.uniforms.uCharge.value = Math.max(0, 1 - k * 2.5);
         // 命中判定：玩家到射线（单方向、延伸出地图外）的垂直距离 <1.1m（每发只结算一次）
         if (!L.hitDone) {
           const d = Math.hypot(L.dir.x, L.dir.z) || 1;
@@ -351,8 +394,7 @@ export class SpiritField {
           }
         }
         if (L.t >= dur) {
-          slot.laserBeam.visible = false;
-          slot.laserGlow.visible = false;
+          this._hideLaser(slot);
           L.state = 'idle';
           L.cd = this._laserCd();
         }
@@ -417,9 +459,7 @@ export class SpiritField {
     if (frozen) {
       // 冻结时收起所有激光
       for (const slot of this.specials) {
-        slot.laserTele.visible = false;
-        slot.laserBeam.visible = false;
-        slot.laserGlow.visible = false;
+        this._hideLaser(slot);
         if (slot.laser.state !== 'idle') {
           slot.laser.state = 'idle';
           slot.laser.cd = this._laserCd();
@@ -452,6 +492,7 @@ export class SpiritField {
     for (const slot of this.specials) {
       slot.alive = false;
       slot.group.visible = false;
+      this._hideLaser(slot);
     }
     this._specialTimer = randomSpecialInterval();
   }
@@ -468,6 +509,7 @@ export class SpiritField {
     for (const slot of this.specials) {
       slot.alive = false;
       slot.group.visible = false;
+      this._hideLaser(slot);
     }
     this._specialTimer = randomSpecialInterval();
   }
@@ -500,8 +542,7 @@ export class SpiritField {
     slot.laser.t = 0;
     slot.laser.cd = 1.2 + Math.random() * 1.2;
     slot.laser.hitDone = false;
-    slot.laserTele.visible = false;
-    slot.laserBeam.visible = false;
+    this._hideLaser(slot);
 
     slot.core.material.emissive.set(accent);
     slot.crystal.material.emissive.set(accent);
@@ -550,11 +591,8 @@ export class SpiritField {
         spirit.alive = false;
         spirit.respawn = 2.4 + Math.random() * 1.4;
         spirit.group.visible = false;
-        this.bursts.emit({
-          pos: spirit.pos, count: 46, speed: [2, 8], up: [2, 9], life: [0.4, 1.0],
-          size: [8, 20], colorA: '#ffffff', colorB: '#' + this._accent.getHexString(),
-          gravity: -6, drag: 1.4
-        });
+        // 击杀特效：沙盒爆裂球（薄压力壳）+ 冲击波环 + 拉伸火花
+        this.vfx?.killBurst(spirit.pos, 'basic', 1);
         normal++;
       }
     }
@@ -570,14 +608,11 @@ export class SpiritField {
           hitSet?.add(slot);
         }
         if (element !== 'basic' && slot.element === element) {
-          // 对应元素技能：直接清除
+          // 对应元素技能：直接清除（元素爆裂球 + 冲击波 + 火花，更大更亮）
           slot.alive = false;
           slot.group.visible = false;
-          this.bursts.emit({
-            pos: slot.pos, count: 90, speed: [3, 11], up: [3, 12], life: [0.5, 1.2],
-            size: [10, 24], colorA: '#ffffff', colorB: '#' + this._accent.getHexString(),
-            gravity: -6, drag: 1.3
-          });
+          this._hideLaser(slot);
+          this.vfx?.killBurst(slot.pos, slot.element, 1.7);
           special++;
         } else if (element === 'basic' && worldFamily === slot.element) {
           // 同色领域内的普通攻击：累积伤害，3 次清除
@@ -585,20 +620,15 @@ export class SpiritField {
           if (slot.basicHits >= 3) {
             slot.alive = false;
             slot.group.visible = false;
-            this.bursts.emit({
-              pos: slot.pos, count: 90, speed: [3, 11], up: [3, 12], life: [0.5, 1.2],
-              size: [10, 24], colorA: '#ffffff', colorB: '#' + this._accent.getHexString(),
-              gravity: -6, drag: 1.3
-            });
+            this._hideLaser(slot);
+            this.vfx?.killBurst(slot.pos, slot.element, 1.7);
             special++;
           } else {
-            // 受击反馈：短促闪光 + 落点迸出小簇火花（普攻打击特殊之灵成功吸收）
+            // 受击反馈：短促闪光 + 小簇火花（普攻打击特殊之灵成功吸收）
             slot.flash = SPECIAL_FLASH_TIME;
             specialHit++;
-            this.bursts.emit({
-              pos: slot.pos, count: 12, speed: [1.5, 4.5], up: [0.8, 3], life: [0.2, 0.45],
-              size: [5, 12], colorA: '#ffffff', colorB: '#' + this._accent.getHexString(),
-              gravity: -2, drag: 2, spread: 0.7
+            this.vfx?.sparkBurst(slot.pos, 'basic', {
+              count: 12, speed: 3.5, life: 0.45, size: 0.6, up: 0.6, radius: 0.3
             });
           }
         } else {
@@ -630,11 +660,12 @@ export class SpiritField {
     for (const slot of this.specials) {
       if (!slot.alive) {
         // 死亡的特殊之灵：确保激光收起
-        if (slot.laserTele.visible || slot.laserBeam.visible) {
-          slot.laserTele.visible = false;
-          slot.laserBeam.visible = false;
-          slot.laser.state = 'idle';
-          slot.laser.cd = this._laserCd();
+        if (slot.laserMeshes.some((m) => m.visible) || slot.laserOrb.visible) {
+          this._hideLaser(slot);
+          if (slot.laser.state !== 'idle') {
+            slot.laser.state = 'idle';
+            slot.laser.cd = this._laserCd();
+          }
         }
         continue;
       }
@@ -659,11 +690,8 @@ export class SpiritField {
       if (hitPlayer) {
         slot.alive = false;
         slot.group.visible = false;
-        this.bursts.emit({
-          pos: slot.pos, count: 90, speed: [3, 11], up: [3, 12], life: [0.5, 1.2],
-          size: [10, 24], colorA: '#ffffff', colorB: '#' + this._accent.getHexString(),
-          gravity: -6, drag: 1.3
-        });
+        this._hideLaser(slot);
+        this.vfx?.killBurst(slot.pos, slot.element, 1.7);
         this.onPlayerHit?.(TOUCH_DAMAGE_SPECIAL);
         continue;
       }
@@ -726,11 +754,7 @@ export class SpiritField {
             spirit.alive = false;
             spirit.respawn = 2.4 + Math.random() * 1.4;
             spirit.group.visible = false;
-            this.bursts.emit({
-              pos: spirit.pos, count: 46, speed: [2, 8], up: [2, 9], life: [0.4, 1.0],
-              size: [8, 20], colorA: '#ffffff', colorB: '#' + this._accent.getHexString(),
-              gravity: -6, drag: 1.4
-            });
+            this.vfx?.killBurst(spirit.pos, 'basic', 1);
             this.onPlayerHit?.(TOUCH_DAMAGE_NORMAL);
             continue;
           }
@@ -774,6 +798,10 @@ export class SpiritField {
     this._group.traverse((object) => {
       if (object.geometry) object.geometry.dispose();
     });
+    for (const slot of this.specials) {
+      for (const material of slot.laserMaterials) material.dispose();
+      slot.laserOrb?.material.dispose();
+    }
     this._bodyMaterial.dispose();
     this._haloMaterial.dispose();
     this._bandMaterial.dispose();

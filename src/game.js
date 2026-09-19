@@ -8,6 +8,7 @@ import { EdgeBoundary } from './edge.js';
 import { GroundFX } from './groundfx.js';
 import { FlightTrail } from './trail.js';
 import { PillarField } from './pillars.js';
+import { VFXSystem } from './vfx/VFXSystem.js';
 import { audio } from './audio.js';
 import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES } from './themes.js';
 
@@ -45,12 +46,14 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 1400);
 
     this.player = new Player(this.scene);
-    this.spells = new SpellManager(this.scene);
-    this.spirits = new SpiritField(this.scene, this.spells.bursts);
+    // 程序化特效总线（移植自 elemental-sandbox）：帧共享 uniform + GPU 粒子 + 爆裂球 + 地面贴花
+    this.vfx = new VFXSystem(this.scene, this.renderer);
+    this.spells = new SpellManager(this.scene, this.vfx);
+    this.spirits = new SpiritField(this.scene, this.spells.bursts, this.vfx);
     this.edge = new EdgeBoundary(this.scene); // 场地边缘感知层
     this.groundFx = new GroundFX(this.scene); // 施法全场地特效（染色浪潮/地裂）
     this.flightTrail = new FlightTrail(this.scene); // Shift 飞行拖尾光带
-    this.pillars = new PillarField(this.scene, (dmg) => this._onPlayerHit(dmg)); // LV.5+ 天降光柱
+    this.pillars = new PillarField(this.scene, (dmg) => this._onPlayerHit(dmg), this.vfx); // LV.3+ 天降光柱
     this.hud = new HUD();
     // 之灵数量随分数增长的目标值（初始温和，逐步提升）
     this._normalTarget = 3;
@@ -867,7 +870,7 @@ export class Game {
     // 开始前的电影式缓慢环视
     if (!this.started) this.orbit.yaw += dt * 0.06;
     this.player.update(dt, move.lengthSq() > 0 ? move : null, this.aimPoint, this.elapsed, flying);
-    this.player.updateShield(this.elapsed, this._invulnT);
+    this.player.updateShield(this.elapsed, this._invulnT, dt);
     // 飞行拖尾光带：只在飞行时采样轨迹，松开 Shift 后自然消散
     this.flightTrail.update(dt, flying ? this.player.root.position : null, ELEMENT_INFO[this.element].accent);
     this._updateCamera(dt);
@@ -977,6 +980,9 @@ export class Game {
     this.pillars.setAccent(this.world.currentAccent);
     this.pillars.update(dt, this.elapsed, this.player.position);
 
+    // 程序化特效总线：推进共享时钟、更新爆裂球/贴花池、上传粒子脏区间
+    this.vfx.update(dt, this.camera, this.renderer);
+
     // 世界还原：上次施法 6 秒内没有再施法，世界退回元素荒原
     if (this.started && !this.over && this._worldRevertT > 0) {
       this._worldRevertT -= dt;
@@ -1007,6 +1013,7 @@ export class Game {
     this.groundFx.dispose();
     this.flightTrail.dispose();
     this.pillars.dispose();
+    this.vfx.dispose();
     this.world.dispose();
     this.renderer.dispose();
   }
