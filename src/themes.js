@@ -74,21 +74,21 @@ export const THEMES = {
     weather: 'fog',
     weather2: 'embers',
     skyTop: '#1b0908',
-    skyBottom: '#5c1e0c',
-    skyHorizon: '#ff7a2e',
+    skyBottom: '#4a180b',
+    skyHorizon: '#c2531f',
     stars: 0.3,
     fogColor: '#3a1c0e',
-    fogNear: 9,
-    fogFar: 82,
+    fogNear: 5,
+    fogFar: 58,
     groundBase: '#261410',
     groundAccent: '#ff5410',
     veinStrength: 1.0,
     keyColor: '#ffd9a8',
-    keyIntensity: 3.4,
+    keyIntensity: 2.4,
     hemiSky: '#a8462a',
     hemiGround: '#170a08',
-    hemiIntensity: 1.4,
-    vignette: 'rgba(58, 10, 4, 0.5)'
+    hemiIntensity: 1.2,
+    vignette: 'rgba(58, 10, 4, 0.55)'
   },
 
   storm: {

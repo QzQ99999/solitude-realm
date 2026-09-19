@@ -285,8 +285,6 @@ export class AudioEngine {
    * 预裁剪（取主冲击段 + 淡出长尾）。加载失败时所有音效自动回退纯合成。
    * 程序化亚低频层始终保留——采样给质感，合成给体重。 */
   SFX_BANK = {
-    shoot:    { file: 'shoot-a',   start: 0.86, dur: 0.9,  fade: 0.28 }, // 从辉光爆点起（跳过死寂）
-    shootB:   { file: 'shoot-b',   start: 1.58, dur: 1.0,  fade: 0.3 },  // 从能量击点起（跳过风声渐起）
     hit:      { file: 'hit',       start: 0.0,  dur: 1.1,  fade: 0.35 },
     castA:    { file: 'cast-a',    start: 1.0,  dur: 2.0,  fade: 0.5 },
     castB:    { file: 'cast-b',    start: 1.7,  dur: 2.2,  fade: 0.6 },
@@ -400,18 +398,16 @@ export class AudioEngine {
     this.duckMusic(false);
   }
 
-  /** 普通攻击：出膛瞬态（发射感）+ 真实辉光弹尾音（随机采样 + 音高变化）。 */
+  /** 普通攻击：失真弹芯劈砍 + 出膛气浪 + 低频推背（最初合成版，随机音高让每发可辨）。 */
   shoot() {
     const v = 0.9 + Math.random() * 0.24;
-    // —— 出膛瞬态：能量弹离开法杖的瞬间（不发闷、不拖沓） ——
-    this.tone({ type: 'sine', f0: 240 * v, f1: 1150 * v, dur: 0.07, gain: 0.1, wet: 0.15 }); // 上行弹射
-    this.noise({ dur: 0.03, gain: 0.07, type: 'highpass', f0: 2600 });                        // 气爆
-    this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.13, wet: 0.2 });           // 低频推背
-    // —— 辉光弹尾音：真实采样从爆点起播（已跳过风声前奏） ——
-    if (this.sample(Math.random() < 0.5 ? 'shoot' : 'shootB', { gain: 0.5, rate: v, wet: 0.3, when: 0.02 })) return;
-    // 回退：纯合成弹芯
+    // 失真弹芯：高频劈砍坠入低频，tanh 饱和给出"能量密度"
     this.tone({ type: 'sawtooth', f0: 1350 * v, f1: 185 * v, dur: 0.17, gain: 0.15, drive: 3.2, wet: 0.25 });
+    this.tone({ type: 'square', f0: 660 * v, f1: 92 * v, dur: 0.15, gain: 0.075, drive: 2.6, wet: 0.25 });
+    // 出膛气浪
     this.noise({ dur: 0.15, gain: 0.12, type: 'bandpass', f0: 3000 * v, f1: 600, q: 1.2, wet: 0.3 });
+    // 低频推背感（弹丸离开法杖的物理重量）
+    this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.13, wet: 0.2 });
   }
 
   /** 普通攻击命中：真实魔法撞击 + 亚低频坠底（打进地里的重量）。 */

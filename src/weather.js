@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const COUNT = 1400;      // 点状天气（雪/余烬/电花）粒子数
+const COUNT = 2400;      // 点状天气（雪/余烬/电花）粒子数
 const RAIN_COUNT = 1100; // 雨线条数
 const AREA = 56;
 const HEIGHT = 17;
@@ -21,11 +21,11 @@ const MODES = {
       p.x += sin(uTime * (0.4 + aSeed * 0.45) + aSeed * 6.283) * (0.9 + aSeed * 1.6);
       p.z += cos(uTime * (0.35 + aSeed * 0.4) + aSeed * 9.1) * (0.9 + aSeed * 1.5);
       p.x += sin(uTime * (1.7 + aSeed) + aSeed * 40.0) * 0.25; // 小幅扑翼
-      vTw = 0.75 + 0.25 * sin(uTime * (0.8 + aSeed * 1.6) + aSeed * 30.0);
+      vTw = 0.8 + 0.2 * sin(uTime * (0.8 + aSeed * 1.6) + aSeed * 30.0);
       vCol = mix(vec3(1.0), vec3(0.78, 0.9, 1.0), aSeed);
-      vSz = 1.5 + aSeed * 1.5;             // 又大又软
+      vSz = 1.9 + aSeed * 1.9;             // 又大又软
     `,
-    alpha: 0.85
+    alpha: 0.95
   },
   embers: {
     body: /* glsl */ `
@@ -207,10 +207,11 @@ export class Weather {
       this._systems.set('rain', { obj: lines, material, intensity: 0, isLine: true });
     }
 
-    /* —— 浓雾层（烈焰领域）：两块大幅雾板贴地漂浮，噪声 alpha 缓滚 —— */
+    /* —— 浓雾层（烈焰领域）：四块大幅雾板自低到高堆叠，噪声 alpha 缓滚 —— */
     {
-      const FOG_LAYER_Y = [0.55, 1.5];
-      const FOG_LAYER_ALPHA = [0.3, 0.22];
+      const FOG_LAYER_Y = [0.35, 0.8, 1.45, 2.3];
+      const FOG_LAYER_ALPHA = [0.36, 0.34, 0.3, 0.26];
+      const FOG_LAYER_R = [54, 50, 46, 40];
       this._fogMaterials = [];
       for (let k = 0; k < FOG_LAYER_Y.length; k++) {
         const material = new THREE.ShaderMaterial({
@@ -260,20 +261,20 @@ export class Weather {
               vec2 drift = vec2(uTime * 0.014, uTime * 0.008);
               float n1 = fbm(vUv * 7.0 + drift + uPhase);
               float n2 = fbm(vUv * 13.0 - drift * 1.7 + uPhase * 2.0);
-              float density = smoothstep(0.28, 0.85, n1 * 0.72 + n2 * 0.42);
+              float density = smoothstep(0.14, 0.72, n1 * 0.72 + n2 * 0.42);
               // 边缘淡出，遮住雾板圆形边界
-              float edge = smoothstep(0.5, 0.32, length(vUv - 0.5));
+              float edge = smoothstep(0.5, 0.3, length(vUv - 0.5));
               float dist = smoothstep(75.0, 14.0, vDist) * smoothstep(0.6, 3.0, vDist);
               float a = density * edge * dist * uIntensity * ${FOG_LAYER_ALPHA[k].toFixed(2)};
               if (a < 0.004) discard;
               // 暖灰雾色，微随噪声起伏
-              vec3 col = mix(vec3(0.32, 0.17, 0.10), vec3(0.44, 0.26, 0.15), n1);
+              vec3 col = mix(vec3(0.3, 0.16, 0.09), vec3(0.46, 0.27, 0.15), n1);
               gl_FragColor = vec4(col, a);
               #include <colorspace_fragment>
             }
           `
         });
-        const mesh = new THREE.Mesh(new THREE.CircleGeometry(46, 48), material);
+        const mesh = new THREE.Mesh(new THREE.CircleGeometry(FOG_LAYER_R[k], 48), material);
         mesh.rotation.x = -Math.PI / 2;
         mesh.position.y = FOG_LAYER_Y[k];
         mesh.renderOrder = 5;
