@@ -284,8 +284,8 @@ export class AudioEngine {
    * 预裁剪（取主冲击段 + 淡出长尾）。加载失败时所有音效自动回退纯合成。
    * 程序化亚低频层始终保留——采样给质感，合成给体重。 */
   SFX_BANK = {
-    shoot:    { file: 'shoot-a',   start: 0.65, dur: 1.0,  fade: 0.3 },
-    shootB:   { file: 'shoot-b',   start: 1.35, dur: 1.3,  fade: 0.3 },
+    shoot:    { file: 'shoot-a',   start: 0.86, dur: 0.9,  fade: 0.28 }, // 从辉光爆点起（跳过死寂）
+    shootB:   { file: 'shoot-b',   start: 1.58, dur: 1.0,  fade: 0.3 },  // 从能量击点起（跳过风声渐起）
     hit:      { file: 'hit',       start: 0.0,  dur: 1.1,  fade: 0.35 },
     castA:    { file: 'cast-a',    start: 1.0,  dur: 2.0,  fade: 0.5 },
     castB:    { file: 'cast-b',    start: 1.7,  dur: 2.2,  fade: 0.6 },
@@ -294,7 +294,7 @@ export class AudioEngine {
     storm:    { file: 'storm',     start: 0.1,  dur: 5.0,  fade: 1.2 },
     ice:      { file: 'ice',       start: 0.0,  dur: 1.44, fade: 0.3 },
     wind:     { file: 'wind',      start: 3.6,  dur: 4.0,  fade: 0.8 },
-    pillar:   { file: 'pillar',    start: 0.25, dur: 2.6,  fade: 0.8 }
+    pillar:   { file: 'pillar',    start: 0.42, dur: 3.0,  fade: 0.8 }    // Strong close thunder explosion
   };
 
   /** 页面加载早期调用：抓取并解码全部样本（裁剪成短缓冲）。 */
@@ -390,19 +390,18 @@ export class AudioEngine {
     this.duckMusic(false);
   }
 
-  /** 普通攻击：真实魔法弹丸音色（随机采样 + 音高变化）+ 低频推背。 */
+  /** 普通攻击：出膛瞬态（发射感）+ 真实辉光弹尾音（随机采样 + 音高变化）。 */
   shoot() {
     const v = 0.9 + Math.random() * 0.24;
-    if (this.sample(Math.random() < 0.5 ? 'shoot' : 'shootB', { gain: 0.5, rate: v, wet: 0.3 })) {
-      // 弹丸离开法杖的低频推背
-      this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.11, wet: 0.2 });
-      return;
-    }
-    // 回退：纯合成
+    // —— 出膛瞬态：能量弹离开法杖的瞬间（不发闷、不拖沓） ——
+    this.tone({ type: 'sine', f0: 240 * v, f1: 1150 * v, dur: 0.07, gain: 0.1, wet: 0.15 }); // 上行弹射
+    this.noise({ dur: 0.03, gain: 0.07, type: 'highpass', f0: 2600 });                        // 气爆
+    this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.13, wet: 0.2 });           // 低频推背
+    // —— 辉光弹尾音：真实采样从爆点起播（已跳过风声前奏） ——
+    if (this.sample(Math.random() < 0.5 ? 'shoot' : 'shootB', { gain: 0.5, rate: v, wet: 0.3, when: 0.02 })) return;
+    // 回退：纯合成弹芯
     this.tone({ type: 'sawtooth', f0: 1350 * v, f1: 185 * v, dur: 0.17, gain: 0.15, drive: 3.2, wet: 0.25 });
-    this.tone({ type: 'square', f0: 660 * v, f1: 92 * v, dur: 0.15, gain: 0.075, drive: 2.6, wet: 0.25 });
     this.noise({ dur: 0.15, gain: 0.12, type: 'bandpass', f0: 3000 * v, f1: 600, q: 1.2, wet: 0.3 });
-    this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.13, wet: 0.2 });
   }
 
   /** 普通攻击命中：真实魔法撞击 + 亚低频坠底（打进地里的重量）。 */
@@ -463,33 +462,39 @@ export class AudioEngine {
     this.noise({ dur: 0.5, gain: 0.05, type: 'bandpass', f0: 700, f1: 2200, q: 1.4, wet: 0.5 });
   }
 
-  /** 光柱落下：神罚轰击——真实 Cinematic impact thunder + 亚低频大坑。 */
+  /** 光柱落下：神罚轰击——真实雷爆采样 + 失真重锤 + 亚低频大坑（打击感拉满）。 */
   pillarStrike() {
-    if (this.sample('pillar', { gain: 0.6, rate: rand(0.96, 1.04), wet: 0.5, heavy: true })) {
-      this.tone({ type: 'sine', f0: 120, f1: 30, dur: 0.9, gain: 0.38, attack: 0.006, wet: 0.45, heavy: true });
-      this.noise({ dur: 0.09, gain: 0.18, type: 'highpass', f0: 1800, wet: 0.4, heavy: true });
-      return;
-    }
-    this.tone({ type: 'sine', f0: 120, f1: 30, dur: 0.9, gain: 0.5, attack: 0.006, wet: 0.45, heavy: true });
-    this.tone({ type: 'sawtooth', f0: 420, f1: 58, dur: 0.42, gain: 0.2, drive: 4.0, wet: 0.4, heavy: true });
+    // 真实雷爆（Strong close thunder explosion，从雷击点起播）
+    const ok = this.sample('pillar', { gain: 0.7, rate: rand(0.96, 1.04), wet: 0.5, heavy: true });
+    // 程序化重锤：亚低频大坑 + 失真爆心 + 裂地瞬态，保证打击感
+    this.tone({ type: 'sine', f0: 120, f1: 30, dur: 0.9, gain: 0.4, attack: 0.006, wet: 0.45, heavy: true });
+    this.tone({ type: 'sawtooth', f0: 420, f1: 58, dur: 0.4, gain: 0.16, drive: 4.0, wet: 0.4, heavy: true });
     this.noise({ dur: 0.09, gain: 0.24, type: 'highpass', f0: 1800, wet: 0.4, heavy: true });
+    if (ok) return;
     this.noise({ dur: 1.5, gain: 0.2, type: 'lowpass', f0: 1900, f1: 110, wet: 0.55 });
     this.metal(1244.5, 0.02, 0.9, 0.035, 0.6);
   }
 
-  /** 特殊之灵激光蓄能：1 秒奥术充能——锯齿爬升 + 加速颤鸣。 */
+  /** 特殊之灵激光蓄能：1 秒危险充能——低鸣上爬 + 加速脉冲嘀嗒 + 高频颤鸣（清晰可闻）。 */
   laserCharge() {
-    this.tone({ type: 'sawtooth', f0: 260, f1: 820, dur: 1.0, gain: 0.075, attack: 0.12, wet: 0.4 });
-    this.tone({ type: 'sine', f0: 1300, f1: 2500, dur: 1.0, gain: 0.035, attack: 0.2, wet: 0.4 });
-    this.noise({ dur: 1.0, gain: 0.03, type: 'bandpass', f0: 900, f1: 2600, q: 2.2, wet: 0.4 });
+    // 低频危险上爬
+    this.tone({ type: 'sawtooth', f0: 175, f1: 620, dur: 1.0, gain: 0.16, attack: 0.12, wet: 0.4, heavy: true });
+    this.tone({ type: 'sine', f0: 68, f1: 128, dur: 1.0, gain: 0.13, attack: 0.1, wet: 0.35, heavy: true });
+    // 加速嘀嗒：0 / 0.3 / 0.55 / 0.75 / 0.9s，音调逐级抬高（经典蓄力提示）
+    [0, 0.3, 0.55, 0.75, 0.9].forEach((t, i) =>
+      this.tone({ type: 'sine', f0: 620 + i * 260, dur: 0.06, gain: 0.1, when: t, wet: 0.35 }));
+    // 高频颤鸣
+    this.tone({ type: 'sine', f0: 1200, f1: 2700, dur: 1.0, gain: 0.055, attack: 0.25, wet: 0.4 });
+    this.noise({ dur: 1.0, gain: 0.055, type: 'bandpass', f0: 900, f1: 2600, q: 2.2, wet: 0.4 });
   }
 
-  /** 特殊之灵激光射击：灼灼焚穿——亮劈 + 失真电锯坠 + 低频补底。 */
+  /** 特殊之灵激光射击：灼灼焚穿——亮劈 + 失真电锯坠 + 低频重补底（威胁感拉满）。 */
   laserFire() {
-    this.noise({ dur: 0.07, gain: 0.17, type: 'highpass', f0: 3800, wet: 0.35 });
-    this.tone({ type: 'sawtooth', f0: 1650, f1: 185, dur: 0.26, gain: 0.15, drive: 3.0, wet: 0.35 });
-    this.tone({ type: 'square', f0: 330, f1: 62, dur: 0.2, gain: 0.07, drive: 2.4, wet: 0.3 });
-    this.tone({ type: 'sine', f0: 130, f1: 44, dur: 0.3, gain: 0.24, when: 0.02, wet: 0.35, heavy: true });
+    this.noise({ dur: 0.06, gain: 0.24, type: 'highpass', f0: 4200, wet: 0.35, heavy: true });
+    this.tone({ type: 'sawtooth', f0: 1500, f1: 175, dur: 0.28, gain: 0.24, drive: 3.4, wet: 0.35, heavy: true });
+    this.tone({ type: 'square', f0: 340, f1: 60, dur: 0.22, gain: 0.12, drive: 2.6, wet: 0.3 });
+    this.noise({ dur: 0.2, gain: 0.12, type: 'bandpass', f0: 3400, f1: 900, q: 1.4, wet: 0.35 });
+    this.tone({ type: 'sine', f0: 130, f1: 42, dur: 0.34, gain: 0.32, when: 0.02, wet: 0.35, heavy: true });
   }
 
   /** 角色受击：重钝 + 护甲哗啦 + 不协和刺痛音程（小二度）。 */
