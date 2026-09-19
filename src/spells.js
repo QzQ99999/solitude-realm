@@ -841,8 +841,8 @@ export class SpellManager {
         colorA: '#a9e4ff', colorB: '#cdefff', colorC: '#f2feff'
       });
       this.vfx.decals.spawn(DecalType.FROST, s.start, {
-        radius: 2.2, life: 5.5, intensity: 0.6, width: 1.5,
-        colorA: '#f0f9ff', colorB: '#79b6dd', height: 0.045
+        radius: 2.2, life: 5.5, intensity: 0.7, width: 1.5,
+        colorA: '#ffffff', colorB: '#6aa5d4', height: 0.045
       });
       this.vfx.sparkBurst(s.start, 'ice', { count: 30, speed: 5, life: 0.6, size: 0.9, up: 1.2 });
       this._flash(s.start, '#8fd8ff', 90);
@@ -860,8 +860,8 @@ export class SpellManager {
       const fx = s.start.x + s.dir.x * s.frostDist + s.side.x * randRange(-1, 1);
       const fz = s.start.z + s.dir.z * s.frostDist + s.side.z * randRange(-1, 1);
       this.vfx.decals.spawn(DecalType.FROST, { x: fx, z: fz }, {
-        radius: 2.0, life: 5.0, intensity: 0.55, width: 1.5,
-        colorA: '#f0f9ff', colorB: '#79b6dd', height: 0.045
+        radius: 2.0, life: 5.0, intensity: 0.65, width: 1.5,
+        colorA: '#ffffff', colorB: '#6aa5d4', height: 0.045
       });
       s.frostDist += 2.4;
     }
@@ -879,8 +879,8 @@ export class SpellManager {
         colorA: '#5fd0ff', colorB: '#f2feff'
       });
       this.vfx.decals.spawn(DecalType.FROST, s.point, {
-        radius: 5.0, life: 7.0, intensity: 0.85, width: 1.5,
-        colorA: '#f0f9ff', colorB: '#79b6dd', height: 0.05
+        radius: 5.0, life: 7.0, intensity: 0.95, width: 1.5,
+        colorA: '#ffffff', colorB: '#6aa5d4', height: 0.05
       });
       this.vfx.sparkBurst(s.point, 'ice', { count: 90, speed: 8, life: 0.9, size: 1.1, up: 1.4 });
       this._flash(s.point, '#8fd8ff', 160);
@@ -1004,16 +1004,16 @@ export class SpellManager {
         colorA: '#ff9a2e', colorB: '#fff3d0'
       });
       this.vfx.decals.spawn(DecalType.CRACK, state.point, {
-        radius: 5.2, life: 5.5, width: 0.14, intensity: 1.2,
-        colorA: '#1a0d05', colorB: '#ff6a12', height: 0.045
+        radius: 5.2, life: 5.5, width: 0.14, intensity: 1.35,
+        colorA: '#0e0703', colorB: '#ff6a12', height: 0.045
       });
       this.vfx.decals.spawn(DecalType.SCORCH, state.point, {
-        radius: 2.8, life: 8.0, intensity: 0.95,
-        colorA: '#0d0907', colorB: '#ff9a2e', height: 0.04
+        radius: 3.2, life: 8.0, intensity: 1.0,
+        colorA: '#070504', colorB: '#ff9a2e', height: 0.04
       });
       this.vfx.decals.spawn(DecalType.DUSTRING, state.point, {
         radius: 4.4, life: 1.1, intensity: 0.7,
-        colorA: '#3a322c', colorB: '#ffb066', height: 0.05
+        colorA: '#26201b', colorB: '#ffb066', height: 0.05
       });
       this.vfx.sparkBurst(state.point, 'fire', { count: 150, speed: 11, life: 1.1, size: 1.2, up: 1.2 });
       this._flash(state.point, '#ffb066', 220);
@@ -1068,8 +1068,8 @@ export class SpellManager {
         colorA: '#c9ecff', colorB: '#ffffff'
       });
       this.vfx.decals.spawn(DecalType.ARC, state.point, {
-        radius: 3.6, life: 0.95, width: 0.6, intensity: 1.1,
-        colorA: '#12060a', colorB: '#c9a6ff', height: 0.045
+        radius: 3.6, life: 0.95, width: 0.6, intensity: 1.25,
+        colorA: '#090407', colorB: '#c9a6ff', height: 0.045
       });
       // 落点四周再撒几片小的电弧灼痕（沙盒 arcRate 沿雷击散布的观感）
       for (let i = 0; i < 4; i++) {
@@ -1080,12 +1080,12 @@ export class SpellManager {
           z: state.point.z + Math.sin(ang) * rad
         }, {
           radius: 1.3 + Math.random() * 1.1, life: 0.8, width: 0.55,
-          intensity: 0.9, colorA: '#12060a', colorB: '#9fdcff', height: 0.04
+          intensity: 1.0, colorA: '#090407', colorB: '#9fdcff', height: 0.04
         });
       }
       this.vfx.decals.spawn(DecalType.SCORCH, state.point, {
-        radius: 1.6, life: 6.0, intensity: 0.5,
-        colorA: '#080b11', colorB: '#8f6bff', height: 0.04
+        radius: 1.6, life: 6.0, intensity: 0.62,
+        colorA: '#04060b', colorB: '#8f6bff', height: 0.04
       });
       this.vfx.sparkBurst(state.point, 'storm', { count: 120, speed: 10, life: 0.8, size: 1.1, up: 1.0 });
       this._flash(state.point, '#c9b8ff', 260);

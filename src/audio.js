@@ -94,6 +94,18 @@ export class AudioEngine {
     this.sfxSend.gain.value = 0.34;
     this.sfxSend.connect(this.verb);
 
+    // 重击总线：普攻命中 / 三系技能落地等大冲击专用。
+    // 独立快攻击压缩器把这些瞬间"钉"在一起——听感更猛、更有体重。
+    this.punch = ctx.createGain();
+    this.punch.gain.value = 1;
+    const punchComp = ctx.createDynamicsCompressor();
+    punchComp.threshold.value = -18;
+    punchComp.knee.value = 10;
+    punchComp.ratio.value = 5;
+    punchComp.attack.value = 0.002;
+    punchComp.release.value = 0.1;
+    this.punch.connect(punchComp).connect(this.mix);
+
     // 音乐总线（音乐引擎自管干湿比例，统一经 musicBus 汇入）
     this.musicBus = ctx.createGain();
     this.musicBus.gain.value = 1;
@@ -142,8 +154,24 @@ export class AudioEngine {
 
   /* ---------------- 合成原语（带混响发送） ---------------- */
 
-  /** 振荡器扫频：f0 → f1，指数包络。wet: 0~1 混响发送量。 */
-  tone({ type = 'sine', f0 = 440, f1 = f0, dur = 0.2, gain = 0.3, attack = 0.005, when = 0, wet = 0.25, detune = 0, glide = false }) {
+  /** tanh 饱和曲线：k 越大越猛（2 轻微胶水感，4+ 明显的轰鸣颗粒）。 */
+  _driveCurve(k) {
+    const n = 1024;
+    const curve = new Float32Array(n);
+    const norm = Math.tanh(k);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * k) / norm;
+    }
+    return curve;
+  }
+
+  /**
+   * 振荡器扫频：f0 → f1，指数包络。
+   * wet: 0~1 混响发送量；drive > 1 时经 tanh 饱和（失真增重）；
+   * heavy: true 时改走重击总线（独立压缩器钉住大冲击）。
+   */
+  tone({ type = 'sine', f0 = 440, f1 = f0, dur = 0.2, gain = 0.3, attack = 0.005, when = 0, wet = 0.25, detune = 0, glide = false, drive = 0, heavy = false }) {
     const ctx = this.ensure();
     if (!ctx) return;
     const t0 = ctx.currentTime + when;
@@ -156,8 +184,15 @@ export class AudioEngine {
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), t0 + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g);
-    g.connect(this.sfxBus);
+    if (drive > 1) {
+      const sh = ctx.createWaveShaper();
+      sh.curve = this._driveCurve(drive);
+      sh.oversample = '2x';
+      osc.connect(sh).connect(g);
+    } else {
+      osc.connect(g);
+    }
+    g.connect(heavy ? this.punch : this.sfxBus);
     if (wet > 0) {
       const w = ctx.createGain();
       w.gain.value = wet;
@@ -168,7 +203,7 @@ export class AudioEngine {
   }
 
   /** 噪声突发：滤波器 f0 → f1 扫频 + 指数包络。 */
-  noise({ dur = 0.3, gain = 0.3, type = 'lowpass', f0 = 1000, f1 = f0, q = 1, attack = 0.005, when = 0, wet = 0.25 }) {
+  noise({ dur = 0.3, gain = 0.3, type = 'lowpass', f0 = 1000, f1 = f0, q = 1, attack = 0.005, when = 0, wet = 0.25, heavy = false }) {
     const ctx = this.ensure();
     if (!ctx) return;
     const t0 = ctx.currentTime + when;
@@ -185,7 +220,7 @@ export class AudioEngine {
     g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), t0 + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(flt).connect(g);
-    g.connect(this.sfxBus);
+    g.connect(heavy ? this.punch : this.sfxBus);
     if (wet > 0) {
       const w = ctx.createGain();
       w.gain.value = wet;
@@ -266,19 +301,30 @@ export class AudioEngine {
     this.duckMusic(false);
   }
 
-  /** 普通攻击：奥术飞弹——气声疾行 + 晶核滑音 + 微光泛音，随机音高让每发可辨。 */
+  /** 普通攻击：奥术弹丸出膛——失真弹芯劈砍 + 气浪疾行 + 低频推背，随机音高让每发可辨。 */
   shoot() {
     const v = 0.9 + Math.random() * 0.24;
-    this.tone({ type: 'sine', f0: 880 * v, f1: 250 * v, dur: 0.17, gain: 0.2, wet: 0.28 });
-    this.tone({ type: 'sine', f0: 1760 * v, f1: 510 * v, dur: 0.1, gain: 0.05, wet: 0.3 });
-    this.noise({ dur: 0.14, gain: 0.1, type: 'bandpass', f0: 2900 * v, f1: 750, q: 1.4, wet: 0.3 });
+    // 失真弹芯：高频劈砍坠入低频，tanh 饱和给出"能量密度"
+    this.tone({ type: 'sawtooth', f0: 1350 * v, f1: 185 * v, dur: 0.17, gain: 0.15, drive: 3.2, wet: 0.25 });
+    this.tone({ type: 'square', f0: 660 * v, f1: 92 * v, dur: 0.15, gain: 0.075, drive: 2.6, wet: 0.25 });
+    // 出膛气浪
+    this.noise({ dur: 0.15, gain: 0.12, type: 'bandpass', f0: 3000 * v, f1: 600, q: 1.2, wet: 0.3 });
+    // 低频推背感（弹丸离开法杖的物理重量）
+    this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.13, wet: 0.2 });
   }
 
-  /** 普通攻击命中：扎实冲击——碎裂噪声 + 低频坠底 + 短金属星火。 */
+  /** 普通攻击命中：实锤——亚低频坠底 + 失真撞击身躯 + 碎裂噪声 + 金属星火。 */
   hit() {
-    this.noise({ dur: 0.15, gain: 0.24, type: 'lowpass', f0: 1500, f1: 240, wet: 0.3 });
-    this.tone({ type: 'sine', f0: 175, f1: 60, dur: 0.14, gain: 0.26, wet: 0.25 });
-    this.metal(2100, 0.01, 0.12, 0.03, 0.4);
+    const v = 0.92 + Math.random() * 0.16;
+    // 亚低频坠底：打进地里的物理重量
+    this.tone({ type: 'sine', f0: 170 * v, f1: 46, dur: 0.26, gain: 0.36, wet: 0.28, heavy: true });
+    // 失真中频：撞击的"身躯"
+    this.tone({ type: 'sawtooth', f0: 470 * v, f1: 88, dur: 0.19, gain: 0.19, drive: 3.6, wet: 0.28, heavy: true });
+    // 碎裂噪声 + 高频瞬态（起音更硬）
+    this.noise({ dur: 0.19, gain: 0.21, type: 'lowpass', f0: 2100, f1: 210, wet: 0.3, heavy: true });
+    this.noise({ dur: 0.03, gain: 0.09, type: 'highpass', f0: 3600 });
+    // 金属星火
+    this.metal(2300, 0.01, 0.14, 0.035, 0.4);
   }
 
   /** 普攻命中特殊之灵未破：黑铁圣物匣的厚重铁鸣。 */
@@ -302,10 +348,11 @@ export class AudioEngine {
     this.noise({ dur: 0.5, gain: 0.05, type: 'bandpass', f0: 700, f1: 2200, q: 1.4, wet: 0.5 });
   }
 
-  /** 光柱落下：神罚轰击——亚低频坠底 + 裂地噪声 + 圣殿长尾。 */
+  /** 光柱落下：神罚轰击——失真爆心 + 亚低频大坑 + 裂地噪声 + 圣殿长尾。 */
   pillarStrike() {
-    this.tone({ type: 'sine', f0: 110, f1: 32, dur: 0.8, gain: 0.42, attack: 0.006, wet: 0.45 });
-    this.noise({ dur: 0.09, gain: 0.22, type: 'highpass', f0: 1800, wet: 0.4 });
+    this.tone({ type: 'sine', f0: 120, f1: 30, dur: 0.9, gain: 0.5, attack: 0.006, wet: 0.45, heavy: true });
+    this.tone({ type: 'sawtooth', f0: 420, f1: 58, dur: 0.42, gain: 0.2, drive: 4.0, wet: 0.4, heavy: true });
+    this.noise({ dur: 0.09, gain: 0.24, type: 'highpass', f0: 1800, wet: 0.4, heavy: true });
     this.noise({ dur: 1.5, gain: 0.2, type: 'lowpass', f0: 1900, f1: 110, wet: 0.55 });
     this.metal(1244.5, 0.02, 0.9, 0.035, 0.6);
   }
@@ -317,12 +364,12 @@ export class AudioEngine {
     this.noise({ dur: 1.0, gain: 0.03, type: 'bandpass', f0: 900, f1: 2600, q: 2.2, wet: 0.4 });
   }
 
-  /** 特殊之灵激光射击：灼灼焚穿——亮劈 + 电锯坠 + 低频补底。 */
+  /** 特殊之灵激光射击：灼灼焚穿——亮劈 + 失真电锯坠 + 低频补底。 */
   laserFire() {
-    this.noise({ dur: 0.07, gain: 0.16, type: 'highpass', f0: 3800, wet: 0.35 });
-    this.tone({ type: 'sawtooth', f0: 1650, f1: 190, dur: 0.26, gain: 0.15, wet: 0.35 });
-    this.tone({ type: 'square', f0: 330, f1: 62, dur: 0.2, gain: 0.07, wet: 0.3 });
-    this.tone({ type: 'sine', f0: 120, f1: 48, dur: 0.28, gain: 0.2, when: 0.02, wet: 0.35 });
+    this.noise({ dur: 0.07, gain: 0.17, type: 'highpass', f0: 3800, wet: 0.35 });
+    this.tone({ type: 'sawtooth', f0: 1650, f1: 185, dur: 0.26, gain: 0.15, drive: 3.0, wet: 0.35 });
+    this.tone({ type: 'square', f0: 330, f1: 62, dur: 0.2, gain: 0.07, drive: 2.4, wet: 0.3 });
+    this.tone({ type: 'sine', f0: 130, f1: 44, dur: 0.3, gain: 0.24, when: 0.02, wet: 0.35, heavy: true });
   }
 
   /** 角色受击：重钝 + 护甲哗啦 + 不协和刺痛音程（小二度）。 */
@@ -386,13 +433,14 @@ export class AudioEngine {
     this.tone({ type: 'triangle', f0: 330, f1: 158, dur: 0.5, gain: 0.07, attack: 0.03, wet: 0.35 });
   }
 
-  /** 特殊元素之灵被击败：圣物匣崩解——晶片迸散 + 圣咏绽放 + 低频尘埃落定。 */
+  /** 特殊元素之灵被击败：圣物匣崩解——失真崩心 + 晶片迸散 + 圣咏绽放 + 亚低频落定。 */
   specialKill() {
-    this.tone({ type: 'sine', f0: 120, f1: 44, dur: 0.4, gain: 0.28, wet: 0.35 });
-    this.noise({ dur: 0.35, gain: 0.16, type: 'highpass', f0: 3000, wet: 0.45 });
+    this.tone({ type: 'sine', f0: 125, f1: 40, dur: 0.55, gain: 0.34, wet: 0.35, heavy: true });
+    this.tone({ type: 'sawtooth', f0: 520, f1: 95, dur: 0.24, gain: 0.14, drive: 3.4, wet: 0.35, heavy: true });
+    this.noise({ dur: 0.35, gain: 0.17, type: 'highpass', f0: 3000, wet: 0.45 });
     const shards = [1568, 1975.5, 2349, 2793, 3322];
     shards.forEach((f, i) =>
-      this.tone({ type: 'sine', f0: f * rand(0.98, 1.02), dur: rand(0.25, 0.4), gain: 0.055, when: 0.05 + i * 0.035, wet: 0.55 }));
+      this.tone({ type: 'sine', f0: f * rand(0.98, 1.02), dur: rand(0.25, 0.4), gain: 0.06, when: 0.05 + i * 0.035, wet: 0.55 }));
     this.tone({ type: 'triangle', f0: 293.66, dur: 1.3, gain: 0.055, attack: 0.15, when: 0.1, wet: 0.6 });
     this.tone({ type: 'triangle', f0: 440, dur: 1.3, gain: 0.04, attack: 0.2, when: 0.1, wet: 0.6 });
   }
@@ -412,30 +460,32 @@ export class AudioEngine {
     this.noise({ dur: 3.2, gain: 0.06, type: 'lowpass', f0: 700, f1: 70, when: 0.3, wet: 0.5 });
   }
 
-  /** 三系技能落地打击，各有史诗化音色。 */
+  /** 三系技能落地打击，各有史诗化音色（全部走重击总线钉住冲击）。 */
   impact(kind) {
     if (kind === 'ice') {
-      // 霜新星：冰面炸裂——玻璃脆响 + 晶簇迸散 + 寒气横扫
-      this.noise({ dur: 0.12, gain: 0.22, type: 'highpass', f0: 3400, wet: 0.4 });
+      // 霜新星：冰层炸裂——亚低频下坠 + 冰层崩挤 + 玻璃炸裂 + 晶簇迸散 + 寒气横扫
+      this.tone({ type: 'sine', f0: 120, f1: 34, dur: 0.5, gain: 0.32, wet: 0.35, heavy: true });
+      this.tone({ type: 'sawtooth', f0: 380, f1: 95, dur: 0.3, gain: 0.12, drive: 3.4, wet: 0.35, heavy: true });
+      this.noise({ dur: 0.11, gain: 0.26, type: 'highpass', f0: 3400, wet: 0.4, heavy: true });
       const crystalline = [1568, 2093, 2637, 3136, 3951, 4699];
       crystalline.forEach((f, i) =>
-        this.tone({ type: 'sine', f0: f * rand(0.97, 1.03), f1: f * 0.9, dur: rand(0.2, 0.35), gain: 0.05, when: 0.02 + i * 0.03, wet: 0.55 }));
-      this.noise({ dur: 0.55, gain: 0.12, type: 'bandpass', f0: 5800, f1: 1700, q: 1.2, wet: 0.5 });
-      this.tone({ type: 'sine', f0: 100, f1: 46, dur: 0.35, gain: 0.2, wet: 0.35 });
+        this.tone({ type: 'sine', f0: f * rand(0.97, 1.03), f1: f * 0.9, dur: rand(0.2, 0.35), gain: 0.06, when: 0.02 + i * 0.03, wet: 0.55 }));
+      this.noise({ dur: 0.55, gain: 0.13, type: 'bandpass', f0: 5800, f1: 1700, q: 1.2, wet: 0.5 });
     } else if (kind === 'fire') {
-      // 落炎陨石：地动山摇——深坑爆轰 + 火焰咆哮长尾 + 飞烬
-      this.tone({ type: 'sine', f0: 130, f1: 36, dur: 0.75, gain: 0.44, attack: 0.005, wet: 0.4 });
-      this.noise({ dur: 0.1, gain: 0.2, type: 'bandpass', f0: 3200, q: 0.8, wet: 0.4 });
-      this.noise({ dur: 1.4, gain: 0.26, type: 'lowpass', f0: 1700, f1: 150, wet: 0.5 });
+      // 落炎陨石：地动山摇——大坑亚低频 + 失真爆心 + 爆裂瞬态 + 火焰咆哮长尾 + 飞烬
+      this.tone({ type: 'sine', f0: 150, f1: 30, dur: 0.95, gain: 0.5, attack: 0.005, wet: 0.4, heavy: true });
+      this.tone({ type: 'sawtooth', f0: 320, f1: 52, dur: 0.5, gain: 0.26, drive: 4.2, wet: 0.4, heavy: true });
+      this.noise({ dur: 0.09, gain: 0.26, type: 'bandpass', f0: 2800, q: 0.7, wet: 0.4, heavy: true });
+      this.noise({ dur: 1.5, gain: 0.28, type: 'lowpass', f0: 1700, f1: 130, wet: 0.5 });
       [2100, 2900, 3800].forEach((f, i) =>
         this.tone({ type: 'sine', f0: f * rand(0.95, 1.05), dur: 0.15, gain: 0.03, when: 0.18 + i * 0.09, wet: 0.5 }));
     } else {
-      // 天雷殛灭：九天惊雷——亮劈 + 电弧嘶鸣 + 滚动雷尾
-      this.noise({ dur: 0.06, gain: 0.3, type: 'highpass', f0: 4800, wet: 0.4 });
-      this.tone({ type: 'square', f0: 165, f1: 58, dur: 0.18, gain: 0.1, wet: 0.3 });
-      this.noise({ dur: 2.2, gain: 0.24, type: 'lowpass', f0: 520, f1: 55, q: 0.7, when: 0.03, wet: 0.55 });
-      this.noise({ dur: 0.9, gain: 0.1, type: 'lowpass', f0: 300, f1: 90, when: 0.5, wet: 0.55 });
-      this.tone({ type: 'sine', f0: 85, f1: 38, dur: 0.7, gain: 0.24, wet: 0.4 });
+      // 天雷殛灭：九天惊雷——亮劈 + 失真电弧 + 雷压亚低频 + 滚动雷尾
+      this.noise({ dur: 0.05, gain: 0.34, type: 'highpass', f0: 4600, wet: 0.4, heavy: true });
+      this.tone({ type: 'square', f0: 190, f1: 52, dur: 0.24, gain: 0.12, drive: 3.0, wet: 0.3 });
+      this.tone({ type: 'sine', f0: 95, f1: 32, dur: 0.85, gain: 0.3, wet: 0.4, heavy: true });
+      this.noise({ dur: 2.2, gain: 0.26, type: 'lowpass', f0: 560, f1: 52, q: 0.7, when: 0.03, wet: 0.55 });
+      this.noise({ dur: 1.0, gain: 0.11, type: 'lowpass', f0: 320, f1: 85, when: 0.55, wet: 0.55 });
     }
   }
 
