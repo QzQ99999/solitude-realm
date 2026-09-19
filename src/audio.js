@@ -34,6 +34,7 @@ export class AudioEngine {
     this._ambient = null;
     this._music = null;
     this._bank = {};        // 已解码裁剪的采样缓冲
+    this._loopBufs = {};    // 环境循环缓冲（整段保留）
     this._bankLoading = null;
     /* 测试钩子：可注入 OfflineAudioContext 做离线渲染检查。 */
     this._ctxFactory = null;
@@ -297,20 +298,29 @@ export class AudioEngine {
     pillar:   { file: 'pillar',    start: 0.42, dur: 3.0,  fade: 0.8 }    // Strong close thunder explosion
   };
 
-  /** 页面加载早期调用：抓取并解码全部样本（裁剪成短缓冲）。 */
+  /** 页面加载早期调用：抓取并解码全部样本（裁剪成短缓冲）+ 环境循环素材。 */
   loadBank() {
     const ctx = this.ensure();
     if (!ctx || this._bankLoading) return this._bankLoading || Promise.resolve();
-    this._bankLoading = Promise.all(
-      Object.entries(this.SFX_BANK).map(async ([name, cfg]) => {
+    this._bankLoading = Promise.all([
+      // 短样本：按能量包络裁剪
+      ...Object.entries(this.SFX_BANK).map(async ([name, cfg]) => {
         try {
           const res = await fetch(`sfx/${cfg.file}.mp3`);
           if (!res.ok) throw new Error(res.status);
           const decoded = await ctx.decodeAudioData(await res.arrayBuffer());
           this._bank[name] = this._trimSample(decoded, cfg);
         } catch { /* 单个样本失败：该音效回退纯合成 */ }
+      }),
+      // 环境循环：整段保留（雷领域雨声）
+      ...Object.entries(this.AMBIENT_LOOPS).map(async ([name, file]) => {
+        try {
+          const res = await fetch(`sfx/${file}`);
+          if (!res.ok) throw new Error(res.status);
+          this._loopBufs[name] = await ctx.decodeAudioData(await res.arrayBuffer());
+        } catch { /* 循环缺失：该领域只有合成环境音 */ }
       })
-    );
+    ]);
     return this._bankLoading;
   }
 
@@ -652,11 +662,16 @@ export class AudioEngine {
 
   /* ---------------- 循环音：领域环境音 ---------------- */
 
+  /** 领域环境循环素材（整段解码、循环播放，文件位于 public/sfx/）。 */
+  AMBIENT_LOOPS = {
+    rain: 'rain.mp3'
+  };
+
   AMBIENT = {
     neutral: { type: 'lowpass', f0: 320, q: 0.55, gain: 0.05, lfoF: 0.11, lfoAmt: 110, drone: [38], droneGain: 0.016 },
     ice:     { type: 'bandpass', f0: 1250, q: 2.2, gain: 0.05, lfoF: 0.23, lfoAmt: 620, drone: [38, 45], droneGain: 0.011, shimmer: 1174.66 },
     fire:    { type: 'lowpass', f0: 240, q: 0.8, gain: 0.065, lfoF: 0.5, lfoAmt: 85, drone: [38], droneGain: 0.02 },
-    storm:   { type: 'bandpass', f0: 520, q: 0.75, gain: 0.06, lfoF: 0.37, lfoAmt: 340, drone: [33, 38], droneGain: 0.014 }
+    storm:   { type: 'bandpass', f0: 520, q: 0.75, gain: 0.05, lfoF: 0.37, lfoAmt: 340, drone: [33, 38], droneGain: 0.014, loop: { buf: 'rain', gain: 0.055 } }
   };
 
   /** 切换领域环境音：旧的 0.8 秒淡出，新的淡入。 */
@@ -754,6 +769,18 @@ export class AudioEngine {
       o.start();
       vib.start();
       sources.push(o, vib);
+    }
+
+    // 领域循环素材（雷领域的真实雨声）
+    if (cfg.loop && this._loopBufs[cfg.loop.buf]) {
+      const src = ctx.createBufferSource();
+      src.buffer = this._loopBufs[cfg.loop.buf];
+      src.loop = true;
+      const lg = ctx.createGain();
+      lg.gain.value = cfg.loop.gain;
+      src.connect(lg).connect(out);
+      src.start();
+      sources.push(src);
     }
 
     this._ambient = { realm: realmId, out, sources };

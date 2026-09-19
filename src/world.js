@@ -148,7 +148,7 @@ export class World {
       this._to = theme;
       this._progress = 0;
 
-      this.weather.setMode(theme.weather);
+      this.weather.setMode(theme.weather, theme.weather2);
       this.current = family;
     }
 
