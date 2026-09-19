@@ -286,7 +286,6 @@ export class AudioEngine {
    * 预裁剪（取主冲击段 + 淡出长尾）。加载失败时所有音效自动回退纯合成。
    * 程序化亚低频层始终保留——采样给质感，合成给体重。 */
   SFX_BANK = {
-    hit:      { file: 'hit',       start: 0.0,  dur: 1.1,  fade: 0.35 },
     castA:    { file: 'cast-a',    start: 1.0,  dur: 2.0,  fade: 0.5 },
     castB:    { file: 'cast-b',    start: 1.7,  dur: 2.2,  fade: 0.6 },
     fireCast: { file: 'cast-fire', start: 0.0,  dur: 3.2,  fade: 0.6 },
@@ -411,19 +410,10 @@ export class AudioEngine {
     this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.13, wet: 0.2 });
   }
 
-  /** 普通攻击命中：真实魔法撞击 + 亚低频坠底（打进地里的重量）。 */
+  /** 普通攻击命中 / 普通之灵被击败：最开始的版本（噪声冲击 + 低频垫）。 */
   hit() {
-    const v = 0.92 + Math.random() * 0.16;
-    if (this.sample('hit', { gain: 0.55, rate: v, wet: 0.32, heavy: true })) {
-      this.tone({ type: 'sine', f0: 170 * v, f1: 46, dur: 0.26, gain: 0.28, wet: 0.28, heavy: true });
-      return;
-    }
-    // 回退：纯合成
-    this.tone({ type: 'sine', f0: 170 * v, f1: 46, dur: 0.26, gain: 0.36, wet: 0.28, heavy: true });
-    this.tone({ type: 'sawtooth', f0: 470 * v, f1: 88, dur: 0.19, gain: 0.19, drive: 3.6, wet: 0.28, heavy: true });
-    this.noise({ dur: 0.19, gain: 0.21, type: 'lowpass', f0: 2100, f1: 210, wet: 0.3, heavy: true });
-    this.noise({ dur: 0.03, gain: 0.09, type: 'highpass', f0: 3600 });
-    this.metal(2300, 0.01, 0.14, 0.035, 0.4);
+    this.noise({ dur: 0.13, gain: 0.26, type: 'lowpass', f0: 1800, f1: 320 });
+    this.tone({ type: 'sine', f0: 220, f1: 85, dur: 0.12, gain: 0.22 });
   }
 
   /** 技能释放（Q/E/R 出手瞬间）：真实法术 whoosh，各系不同气质。 */
