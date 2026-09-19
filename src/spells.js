@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { frame } from './vfx/FrameUniforms.js';
+import { audio } from './audio.js';
 import { Easing, saturate, lerp, randRange } from './vfx/math.js';
 import { createCrystalGeometry } from './vfx/ProceduralGeometry.js';
 import { createAsteroidGeometry } from './vfx/ProceduralGeometry.js';
@@ -704,6 +705,7 @@ export class SpellManager {
     if (element === 'ice') this._castIce(from, to, onImpact);
     else if (element === 'fire') this._castFire(from, to, onImpact);
     else if (element === 'storm') this._castStorm(to, onImpact);
+    audio.spellCast(element); // 施法呼啸（真实采样，各系不同气质）
   }
 
   /**

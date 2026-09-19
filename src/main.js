@@ -1,9 +1,11 @@
 import './styles.css';
 import { Game } from './game.js';
+import { audio } from './audio.js';
 
 const canvas = document.getElementById('app');
 
 function boot() {
+  audio.loadBank(); // 抢在场景装载期间抓取/解码音效采样（失败自动回退合成）
   try {
     const game = new Game(canvas);
     window.game = game; // 控制台可触达，方便把玩

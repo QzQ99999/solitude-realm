@@ -33,6 +33,8 @@ export class AudioEngine {
     this.realm = 'neutral';
     this._ambient = null;
     this._music = null;
+    this._bank = {};        // 已解码裁剪的采样缓冲
+    this._bankLoading = null;
     /* 测试钩子：可注入 OfflineAudioContext 做离线渲染检查。 */
     this._ctxFactory = null;
   }
@@ -77,7 +79,14 @@ export class AudioEngine {
 
     this.master = ctx.createGain();
     this.master.gain.value = 0.9;
-    this.mix.connect(comp).connect(this.master).connect(ctx.destination);
+    // 末端安全限制器：尖锐瞬态叠加溜过压缩器时兜底防爆音
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -3;
+    limiter.knee.value = 2;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.08;
+    this.mix.connect(comp).connect(this.master).connect(limiter).connect(ctx.destination);
 
     // 大教堂混响：程序生成 IR（暗色长尾 + 早期反射）
     this.verb = ctx.createConvolver();
@@ -270,7 +279,87 @@ export class AudioEngine {
     });
   }
 
-  /* ---------------- 一次性音效（全部重新设计） ---------------- */
+  /* ---------------- 真实采样库（Mixkit 免费许可） ----------------
+   * 普攻与技能的"魔法质感"来自真实录制的法术音效；每个样本按能量包络
+   * 预裁剪（取主冲击段 + 淡出长尾）。加载失败时所有音效自动回退纯合成。
+   * 程序化亚低频层始终保留——采样给质感，合成给体重。 */
+  SFX_BANK = {
+    shoot:    { file: 'shoot-a',   start: 0.65, dur: 1.0,  fade: 0.3 },
+    shootB:   { file: 'shoot-b',   start: 1.35, dur: 1.3,  fade: 0.3 },
+    hit:      { file: 'hit',       start: 0.0,  dur: 1.1,  fade: 0.35 },
+    castA:    { file: 'cast-a',    start: 1.0,  dur: 2.0,  fade: 0.5 },
+    castB:    { file: 'cast-b',    start: 1.7,  dur: 2.2,  fade: 0.6 },
+    fireCast: { file: 'cast-fire', start: 0.0,  dur: 3.2,  fade: 0.6 },
+    fireHit:  { file: 'fire',      start: 0.0,  dur: 3.6,  fade: 0.7 },
+    storm:    { file: 'storm',     start: 0.1,  dur: 5.0,  fade: 1.2 },
+    ice:      { file: 'ice',       start: 0.0,  dur: 1.44, fade: 0.3 },
+    wind:     { file: 'wind',      start: 3.6,  dur: 4.0,  fade: 0.8 },
+    pillar:   { file: 'pillar',    start: 0.25, dur: 2.6,  fade: 0.8 }
+  };
+
+  /** 页面加载早期调用：抓取并解码全部样本（裁剪成短缓冲）。 */
+  loadBank() {
+    const ctx = this.ensure();
+    if (!ctx || this._bankLoading) return this._bankLoading || Promise.resolve();
+    this._bankLoading = Promise.all(
+      Object.entries(this.SFX_BANK).map(async ([name, cfg]) => {
+        try {
+          const res = await fetch(`sfx/${cfg.file}.mp3`);
+          if (!res.ok) throw new Error(res.status);
+          const decoded = await ctx.decodeAudioData(await res.arrayBuffer());
+          this._bank[name] = this._trimSample(decoded, cfg);
+        } catch { /* 单个样本失败：该音效回退纯合成 */ }
+      })
+    );
+    return this._bankLoading;
+  }
+
+  /** 裁剪出主冲击段并做淡入（6ms 防爆音）与淡出。 */
+  _trimSample(src, { start, dur, fade }) {
+    const sr = src.sampleRate;
+    const s0 = Math.min(Math.floor(start * sr), Math.max(0, src.length - 1));
+    const len = Math.min(Math.floor(dur * sr), src.length - s0);
+    const out = this.ctx.createBuffer(2, len, sr);
+    const fadeOut = Math.min(Math.floor(fade * sr), len >> 1);
+    const fadeIn = Math.min(Math.floor(0.006 * sr), len >> 2);
+    for (let ch = 0; ch < 2; ch++) {
+      const sd = src.getChannelData(Math.min(ch, src.numberOfChannels - 1));
+      const dd = out.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        let g = 1;
+        if (i < fadeIn) g *= i / fadeIn;
+        if (i > len - fadeOut) g *= Math.max(0, (len - i) / fadeOut);
+        dd[i] = sd[s0 + i] * g;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 播放采样。返回 false 表示库未加载（调用方回退纯合成）。
+   * rate 做随机音高变化，让同一音效每次发声都不同。
+   */
+  sample(name, { gain = 1, when = 0, wet = 0.35, heavy = false, rate = 1 } = {}) {
+    const ctx = this.ensure();
+    if (!ctx || !this._bank || !this._bank[name]) return false;
+    const t0 = ctx.currentTime + when;
+    const src = ctx.createBufferSource();
+    src.buffer = this._bank[name];
+    src.playbackRate.value = Math.max(0.5, rate);
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g);
+    g.connect(heavy ? this.punch : this.sfxBus);
+    if (wet > 0) {
+      const w = ctx.createGain();
+      w.gain.value = wet;
+      g.connect(w).connect(this.sfxSend);
+    }
+    src.start(t0);
+    return true;
+  }
+
+  /* ---------------- 一次性音效（真实采样 + 程序化加固） ---------------- */
 
   /** 开始游戏：圣殿封印开启——石质闷响 + 研磨 + 高频微光。 */
   click() {
@@ -301,30 +390,56 @@ export class AudioEngine {
     this.duckMusic(false);
   }
 
-  /** 普通攻击：奥术弹丸出膛——失真弹芯劈砍 + 气浪疾行 + 低频推背，随机音高让每发可辨。 */
+  /** 普通攻击：真实魔法弹丸音色（随机采样 + 音高变化）+ 低频推背。 */
   shoot() {
     const v = 0.9 + Math.random() * 0.24;
-    // 失真弹芯：高频劈砍坠入低频，tanh 饱和给出"能量密度"
+    if (this.sample(Math.random() < 0.5 ? 'shoot' : 'shootB', { gain: 0.5, rate: v, wet: 0.3 })) {
+      // 弹丸离开法杖的低频推背
+      this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.11, wet: 0.2 });
+      return;
+    }
+    // 回退：纯合成
     this.tone({ type: 'sawtooth', f0: 1350 * v, f1: 185 * v, dur: 0.17, gain: 0.15, drive: 3.2, wet: 0.25 });
     this.tone({ type: 'square', f0: 660 * v, f1: 92 * v, dur: 0.15, gain: 0.075, drive: 2.6, wet: 0.25 });
-    // 出膛气浪
     this.noise({ dur: 0.15, gain: 0.12, type: 'bandpass', f0: 3000 * v, f1: 600, q: 1.2, wet: 0.3 });
-    // 低频推背感（弹丸离开法杖的物理重量）
     this.tone({ type: 'sine', f0: 185, f1: 64, dur: 0.11, gain: 0.13, wet: 0.2 });
   }
 
-  /** 普通攻击命中：实锤——亚低频坠底 + 失真撞击身躯 + 碎裂噪声 + 金属星火。 */
+  /** 普通攻击命中：真实魔法撞击 + 亚低频坠底（打进地里的重量）。 */
   hit() {
     const v = 0.92 + Math.random() * 0.16;
-    // 亚低频坠底：打进地里的物理重量
+    if (this.sample('hit', { gain: 0.55, rate: v, wet: 0.32, heavy: true })) {
+      this.tone({ type: 'sine', f0: 170 * v, f1: 46, dur: 0.26, gain: 0.28, wet: 0.28, heavy: true });
+      return;
+    }
+    // 回退：纯合成
     this.tone({ type: 'sine', f0: 170 * v, f1: 46, dur: 0.26, gain: 0.36, wet: 0.28, heavy: true });
-    // 失真中频：撞击的"身躯"
     this.tone({ type: 'sawtooth', f0: 470 * v, f1: 88, dur: 0.19, gain: 0.19, drive: 3.6, wet: 0.28, heavy: true });
-    // 碎裂噪声 + 高频瞬态（起音更硬）
     this.noise({ dur: 0.19, gain: 0.21, type: 'lowpass', f0: 2100, f1: 210, wet: 0.3, heavy: true });
     this.noise({ dur: 0.03, gain: 0.09, type: 'highpass', f0: 3600 });
-    // 金属星火
     this.metal(2300, 0.01, 0.14, 0.035, 0.4);
+  }
+
+  /** 技能释放（Q/E/R 出手瞬间）：真实法术 whoosh，各系不同气质。 */
+  spellCast(kind) {
+    if (!this.ensure()) return;
+    let ok = false;
+    if (kind === 'fire') {
+      // 燃烧的施法呼啸
+      ok = this.sample('fireCast', { gain: 0.45, rate: rand(0.95, 1.05), wet: 0.45 });
+    } else if (kind === 'ice') {
+      // 寒风骤起 + 奥术 whoosh
+      ok = this.sample('wind', { gain: 0.28, rate: rand(1.1, 1.25), wet: 0.4 });
+      this.sample('castA', { gain: 0.28, rate: rand(1.05, 1.18), wet: 0.5 });
+      ok = ok || this._bank && this._bank.castA;
+    } else {
+      // 天雷聚合：疾风 whoosh
+      ok = this.sample('castB', { gain: 0.42, rate: rand(0.98, 1.1), wet: 0.45 });
+    }
+    if (ok) return;
+    // 回退：程序化上行 whoosh
+    this.tone({ type: 'sawtooth', f0: 220, f1: 660, dur: 0.3, gain: 0.06, attack: 0.06, wet: 0.4 });
+    this.noise({ dur: 0.35, gain: 0.09, type: 'bandpass', f0: 600, f1: 2600, q: 1.2, wet: 0.4 });
   }
 
   /** 普攻命中特殊之灵未破：黑铁圣物匣的厚重铁鸣。 */
@@ -348,8 +463,13 @@ export class AudioEngine {
     this.noise({ dur: 0.5, gain: 0.05, type: 'bandpass', f0: 700, f1: 2200, q: 1.4, wet: 0.5 });
   }
 
-  /** 光柱落下：神罚轰击——失真爆心 + 亚低频大坑 + 裂地噪声 + 圣殿长尾。 */
+  /** 光柱落下：神罚轰击——真实 Cinematic impact thunder + 亚低频大坑。 */
   pillarStrike() {
+    if (this.sample('pillar', { gain: 0.6, rate: rand(0.96, 1.04), wet: 0.5, heavy: true })) {
+      this.tone({ type: 'sine', f0: 120, f1: 30, dur: 0.9, gain: 0.38, attack: 0.006, wet: 0.45, heavy: true });
+      this.noise({ dur: 0.09, gain: 0.18, type: 'highpass', f0: 1800, wet: 0.4, heavy: true });
+      return;
+    }
     this.tone({ type: 'sine', f0: 120, f1: 30, dur: 0.9, gain: 0.5, attack: 0.006, wet: 0.45, heavy: true });
     this.tone({ type: 'sawtooth', f0: 420, f1: 58, dur: 0.42, gain: 0.2, drive: 4.0, wet: 0.4, heavy: true });
     this.noise({ dur: 0.09, gain: 0.24, type: 'highpass', f0: 1800, wet: 0.4, heavy: true });
@@ -380,8 +500,9 @@ export class AudioEngine {
     this.tone({ type: 'triangle', f0: 220, dur: 0.3, gain: 0.07, when: 0.02, wet: 0.45 });
   }
 
-  /** 风系护盾展开：气旋外扩 + 空灵五度和音（D5+A5 颤音微光）。 */
+  /** 风系护盾展开：真实风暴风声 + 空灵五度和音（D5+A5 颤音微光）。 */
   shield() {
+    this.sample('wind', { gain: 0.4, rate: rand(1.15, 1.3), wet: 0.4 });
     this.noise({ dur: 0.45, gain: 0.13, type: 'bandpass', f0: 500, f1: 2600, q: 1.1, wet: 0.4 });
     this.tone({ type: 'sine', f0: 587.33, dur: 0.7, gain: 0.07, attack: 0.08, wet: 0.5 });
     this.tone({ type: 'sine', f0: 880, dur: 0.7, gain: 0.05, attack: 0.1, wet: 0.5 });
@@ -460,10 +581,18 @@ export class AudioEngine {
     this.noise({ dur: 3.2, gain: 0.06, type: 'lowpass', f0: 700, f1: 70, when: 0.3, wet: 0.5 });
   }
 
-  /** 三系技能落地打击，各有史诗化音色（全部走重击总线钉住冲击）。 */
+  /** 三系技能落地打击：真实采样（冰碎/火爆/惊雷）+ 程序化亚低频重量。 */
   impact(kind) {
     if (kind === 'ice') {
-      // 霜新星：冰层炸裂——亚低频下坠 + 冰层崩挤 + 玻璃炸裂 + 晶簇迸散 + 寒气横扫
+      if (this.sample('ice', { gain: 0.6, rate: rand(0.9, 1.1), wet: 0.5, heavy: true })) {
+        this.tone({ type: 'sine', f0: 120, f1: 34, dur: 0.5, gain: 0.3, wet: 0.35, heavy: true });
+        const crystalline = [1568, 2093, 2637, 3136, 3951];
+        crystalline.forEach((f, i) =>
+          this.tone({ type: 'sine', f0: f * rand(0.97, 1.03), f1: f * 0.9, dur: rand(0.2, 0.35), gain: 0.045, when: 0.02 + i * 0.03, wet: 0.55 }));
+        this.noise({ dur: 0.5, gain: 0.09, type: 'bandpass', f0: 5800, f1: 1700, q: 1.2, wet: 0.5 });
+        return;
+      }
+      // 回退：纯合成
       this.tone({ type: 'sine', f0: 120, f1: 34, dur: 0.5, gain: 0.32, wet: 0.35, heavy: true });
       this.tone({ type: 'sawtooth', f0: 380, f1: 95, dur: 0.3, gain: 0.12, drive: 3.4, wet: 0.35, heavy: true });
       this.noise({ dur: 0.11, gain: 0.26, type: 'highpass', f0: 3400, wet: 0.4, heavy: true });
@@ -472,15 +601,21 @@ export class AudioEngine {
         this.tone({ type: 'sine', f0: f * rand(0.97, 1.03), f1: f * 0.9, dur: rand(0.2, 0.35), gain: 0.06, when: 0.02 + i * 0.03, wet: 0.55 }));
       this.noise({ dur: 0.55, gain: 0.13, type: 'bandpass', f0: 5800, f1: 1700, q: 1.2, wet: 0.5 });
     } else if (kind === 'fire') {
-      // 落炎陨石：地动山摇——大坑亚低频 + 失真爆心 + 爆裂瞬态 + 火焰咆哮长尾 + 飞烬
+      if (this.sample('fireHit', { gain: 0.62, rate: rand(0.93, 1.05), wet: 0.5, heavy: true })) {
+        this.tone({ type: 'sine', f0: 150, f1: 30, dur: 0.95, gain: 0.4, attack: 0.005, wet: 0.4, heavy: true });
+        this.noise({ dur: 0.09, gain: 0.16, type: 'bandpass', f0: 2800, q: 0.7, wet: 0.4, heavy: true });
+        return;
+      }
       this.tone({ type: 'sine', f0: 150, f1: 30, dur: 0.95, gain: 0.5, attack: 0.005, wet: 0.4, heavy: true });
       this.tone({ type: 'sawtooth', f0: 320, f1: 52, dur: 0.5, gain: 0.26, drive: 4.2, wet: 0.4, heavy: true });
       this.noise({ dur: 0.09, gain: 0.26, type: 'bandpass', f0: 2800, q: 0.7, wet: 0.4, heavy: true });
       this.noise({ dur: 1.5, gain: 0.28, type: 'lowpass', f0: 1700, f1: 130, wet: 0.5 });
-      [2100, 2900, 3800].forEach((f, i) =>
-        this.tone({ type: 'sine', f0: f * rand(0.95, 1.05), dur: 0.15, gain: 0.03, when: 0.18 + i * 0.09, wet: 0.5 }));
     } else {
-      // 天雷殛灭：九天惊雷——亮劈 + 失真电弧 + 雷压亚低频 + 滚动雷尾
+      if (this.sample('storm', { gain: 0.62, rate: rand(0.95, 1.05), wet: 0.5, heavy: true })) {
+        this.noise({ dur: 0.05, gain: 0.26, type: 'highpass', f0: 4600, wet: 0.4, heavy: true });
+        this.tone({ type: 'sine', f0: 95, f1: 32, dur: 0.85, gain: 0.26, wet: 0.4, heavy: true });
+        return;
+      }
       this.noise({ dur: 0.05, gain: 0.34, type: 'highpass', f0: 4600, wet: 0.4, heavy: true });
       this.tone({ type: 'square', f0: 190, f1: 52, dur: 0.24, gain: 0.12, drive: 3.0, wet: 0.3 });
       this.tone({ type: 'sine', f0: 95, f1: 32, dur: 0.85, gain: 0.3, wet: 0.4, heavy: true });
