@@ -116,9 +116,10 @@ export class AudioEngine {
     punchComp.release.value = 0.1;
     this.punch.connect(punchComp).connect(this.mix);
 
-    // 音乐总线（音乐引擎自管干湿比例，统一经 musicBus 汇入）
+    // 音乐总线（音乐引擎自管干湿比例，统一经 musicBus 汇入）。
+    // 音乐整体压低一档（-4.4dB），给音效留出空间
     this.musicBus = ctx.createGain();
-    this.musicBus.gain.value = 1;
+    this.musicBus.gain.value = 0.6;
     this.musicBus.connect(this.mix);
   }
 
@@ -577,19 +578,19 @@ export class AudioEngine {
     this.tone({ type: 'triangle', f0: 440, dur: 1.3, gain: 0.04, attack: 0.2, when: 0.1, wet: 0.6 });
   }
 
-  /** 角色被击败：黑暗 Braam + 圣咏下行安魂 + 远处丧钟。 */
+  /** 角色被击败：黑暗 Braam + 圣咏下行安魂 + 远处丧钟（清晰可闻的终局）。 */
   death() {
     // Braam：低音号角群（微降音头）
     [36.71, 73.42, 110].forEach((f, i) =>
-      this.tone({ type: 'sawtooth', f0: f * 0.96, f1: f, dur: 2.6, gain: 0.075, attack: 0.25, when: i * 0.02, wet: 0.55 }));
-    this.tone({ type: 'sine', f0: 36.71, dur: 2.8, gain: 0.16, attack: 0.2, wet: 0.45 });
+      this.tone({ type: 'sawtooth', f0: f * 0.96, f1: f, dur: 2.6, gain: 0.13, attack: 0.2, when: i * 0.02, wet: 0.55, heavy: true }));
+    this.tone({ type: 'sine', f0: 36.71, dur: 3.0, gain: 0.24, attack: 0.15, wet: 0.45, heavy: true });
     // 圣咏下行：D4 → C4 → Bb3 → A3
     [293.66, 261.63, 233.08, 220].forEach((f, i) => {
-      this.tone({ type: 'sawtooth', f0: f, dur: 0.85, gain: 0.05, attack: 0.15, when: 0.35 + i * 0.5, wet: 0.6 });
-      this.tone({ type: 'sine', f0: f * 2, dur: 0.7, gain: 0.02, attack: 0.15, when: 0.35 + i * 0.5, wet: 0.6 });
+      this.tone({ type: 'sawtooth', f0: f, dur: 0.85, gain: 0.09, attack: 0.12, when: 0.3 + i * 0.5, wet: 0.6 });
+      this.tone({ type: 'sine', f0: f * 2, dur: 0.7, gain: 0.04, attack: 0.12, when: 0.3 + i * 0.5, wet: 0.6 });
     });
-    this.metal(146.83, 1.6, 2.4, 0.05, 0.65, [1, 2.4, 3.9, 5.4], [1, 0.5, 0.3, 0.2]);
-    this.noise({ dur: 3.2, gain: 0.06, type: 'lowpass', f0: 700, f1: 70, when: 0.3, wet: 0.5 });
+    this.metal(146.83, 1.6, 2.4, 0.08, 0.65, [1, 2.4, 3.9, 5.4], [1, 0.5, 0.3, 0.2]);
+    this.noise({ dur: 3.2, gain: 0.09, type: 'lowpass', f0: 700, f1: 70, when: 0.3, wet: 0.5 });
   }
 
   /** 三系技能落地打击：真实采样（冰碎/火爆/惊雷）+ 程序化亚低频重量。 */

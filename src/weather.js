@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
-const COUNT = 2400;      // 点状天气（雪/余烬/电花）粒子数
-const RAIN_COUNT = 1100; // 雨线条数
-const AREA = 56;
+const COUNT = 6000;      // 点状天气（雪/余烬/电花）粒子数（固定于场地，需覆盖全场地）
+const RAIN_COUNT = 2600; // 雨线条数
+const AREA = 120;        // 天气场边长（固定于场地中心，覆盖 58m 半径边界）
 const HEIGHT = 17;
 
 /**
@@ -394,7 +394,7 @@ export class Weather {
   }
 
   update(dt, elapsed, anchor) {
-    /* 粒子/雨线系统 */
+    /* 粒子/雨线系统：固定于场地中心，不跟随玩家 */
     for (const [mode, system] of this._systems) {
       let target = 0;
       if (mode === this._primary) target = 1;
@@ -408,7 +408,6 @@ export class Weather {
       system.obj.visible = true;
       system.material.uniforms.uTime.value = elapsed;
       system.material.uniforms.uIntensity.value = system.intensity;
-      if (anchor) system.obj.position.set(anchor.x, 0, anchor.z);
     }
 
     /* 地面浓雾板：固定于场地中心，不跟随玩家 */

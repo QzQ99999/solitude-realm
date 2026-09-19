@@ -234,7 +234,7 @@ export class PillarField {
       this._ringGeo2 ?? (this._ringGeo2 = new THREE.RingGeometry(1.05, 2.3, 40)),
       new THREE.MeshBasicMaterial({
         color: this.accent.clone(), transparent: true, opacity: 0.8,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false
       })
     );
     ring.rotation.x = -Math.PI / 2;

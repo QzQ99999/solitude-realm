@@ -66,12 +66,13 @@ export class SpiritField {
     this._group = new THREE.Group();
     scene.add(this._group);
 
-    // 缚灵：幽蓝魂火（共享材质）
+    // 缚灵：幽蓝魂火（共享材质；不受雾影响——浓雾里也要远远看见幽光）
     this._bodyMaterial = new THREE.MeshStandardMaterial({
       color: '#dceaff',
       emissive: '#8fc6ef',
       emissiveIntensity: 2.2,
-      roughness: 0.35
+      roughness: 0.35,
+      fog: false
     });
     this._haloMaterial = new THREE.SpriteMaterial({
       map: haloTexture,
@@ -79,7 +80,8 @@ export class SpiritField {
       transparent: true,
       opacity: 0.6,
       blending: THREE.AdditiveBlending,
-      depthWrite: false
+      depthWrite: false,
+      fog: false
     });
     // 锈蚀铁枷锁（共享材质）
     this._bandMaterial = new THREE.MeshStandardMaterial({
@@ -153,7 +155,8 @@ export class SpiritField {
           emissiveIntensity: 1.6,
           roughness: 0.45,
           metalness: 0.7,
-          flatShading: true
+          flatShading: true,
+          fog: false
         })
       );
       // 顶端元素晶体（单独材质，spawnSpecial 按元素染色）
@@ -163,14 +166,15 @@ export class SpiritField {
           color: '#dfeeff',
           emissive: '#9fd8ff',
           emissiveIntensity: 2.6,
-          roughness: 0.25
+          roughness: 0.25,
+          fog: false
         })
       );
       crystal.position.y = 0.52;
       // 环绕的符文铁环，环上倒悬三根尖刺
       const ring = new THREE.Mesh(
         specialRingGeometry,
-        new THREE.MeshBasicMaterial({ color: '#9fd8ff', transparent: true, opacity: 0.85 })
+        new THREE.MeshBasicMaterial({ color: '#9fd8ff', transparent: true, opacity: 0.85, fog: false })
       );
       ring.rotation.x = 1.35;
       for (let s = 0; s < 3; s++) {
