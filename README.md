@@ -49,6 +49,7 @@ npm run dev        # http://127.0.0.1:5180
 ```
 public/arena.glb    竞技场场景（Blender 导出，42MB，Draco 压缩）
 public/character/   玩家角色模型与动作（FBX 原件不入库，glb/ 为运行时资源）
+public/goblet/      中央巨型圣杯与环边火炬（模型/贴图，FBX 原件不入库）
 public/draco/       Draco 解码器
 src/arena.js        场景加载与网格合并
 src/game.js         游戏主循环 / 输入 / 相机

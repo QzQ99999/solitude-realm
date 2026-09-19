@@ -8,6 +8,8 @@ import { EdgeBoundary } from './edge.js';
 import { GroundFX } from './groundfx.js';
 import { FlightTrail } from './trail.js';
 import { PillarField } from './pillars.js';
+import { Goblet, GOBLET_COLLIDER_RADIUS, GOBLET_POSITION } from './goblet.js';
+import { TorchRing } from './torches.js';
 import { VFXSystem } from './vfx/VFXSystem.js';
 import { audio } from './audio.js';
 import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES } from './themes.js';
@@ -17,6 +19,8 @@ const STAMINA_DRAIN_TIME = 6; // 满体力持续飞行的秒数
 const STAMINA_REGEN_TIME = 9; // 清零后回满的秒数
 const STAMINA_REFLY = 25; // 耗尽后需恢复到该百分比才能再次飞行
 const MIN_RANGE = 3;
+// 初始轨道镜头落位（重开时恢复朝向）
+const ORBIT_HOME = { yaw: Math.PI * 0.25, pitch: 0.56, dist: 9.5 };
 const MAX_RANGE = 26;
 
 /**
@@ -46,6 +50,10 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 1400);
 
     this.player = new Player(this.scene);
+    // 中央巨型圣杯：摆件 + 柱基碰撞（把玩家推出，禁止穿模）
+    this.goblet = new Goblet(this.scene);
+    this.torches = new TorchRing(this.scene);
+    this.player.obstacles = [{ x: GOBLET_POSITION.x, z: GOBLET_POSITION.z, r: GOBLET_COLLIDER_RADIUS }];
     // 程序化特效总线（移植自 elemental-sandbox）：帧共享 uniform + GPU 粒子 + 爆裂球 + 地面贴花
     this.vfx = new VFXSystem(this.scene, this.renderer);
     this.spells = new SpellManager(this.scene, this.vfx);
@@ -110,7 +118,7 @@ export class Game {
     });
 
     /* ---- 相机轨道 ---- */
-    this.orbit = { yaw: Math.PI * 0.25, pitch: 0.56, dist: 9.5 }; // 初始镜头：距离近、高度适中
+    this.orbit = { ...ORBIT_HOME };
 
     /* ---- 指针与瞄准 ---- */
     this.pointer = new THREE.Vector2(0, 0);
@@ -396,6 +404,7 @@ export class Game {
     audio.startMusic(); // 背景音乐（ Chillhop 循环）
     this.started = true;
     this.paused = false;
+    this.player.respawn(); // 出生点重置（避开中央圣杯）
     this.hud.hidePause();
     this.hud.hideStartScreen();
     this.hud.setLockHint(false);
@@ -470,6 +479,8 @@ export class Game {
   restart() {
     this.over = false;
     this.paused = false;
+    this.player.respawn(); // 位置回到出生点
+    this.orbit = { ...ORBIT_HOME }; // 镜头朝向也恢复初始落位
     this.hud.hidePause();
     this.hud.setEdgeHint(false);
     this._edgeWasPushing = false;
@@ -794,6 +805,8 @@ export class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.spells.bursts.setPixelRatio(this._pxRatio);
     this.world.weather.setPixelRatio(this._pxRatio);
+    this.goblet?.setPixelRatio(this._pxRatio);
+    this.torches?.setPixelRatio(this._pxRatio);
   }
 
   frame(dt) {
@@ -973,6 +986,10 @@ export class Game {
     this.spirits.update(dt, this.elapsed, this.player.position);
     this.spirits.laserTier = this.tier; // LV.5+ 特殊之灵激光射击速率
     this.world.update(dt, this.elapsed, this.player.position, this.hud.vignette);
+    // 圣杯：火焰/烟/发光颜色跟随当前领域（元素荒原 = 青色火焰）
+    const realmAccent = this.world.current === 'neutral' ? '#40e0d0' : this.world.currentAccent;
+    this.goblet.update(dt, this.elapsed, realmAccent);
+    this.torches.update(dt, this.elapsed, realmAccent);
     // 全场地特效：浪潮/地裂推进；领域残辉跟随当前世界（退回荒原即消散）
     this.groundFx.update(dt, this.world.currentAccent, this.world.current !== 'neutral');
     // LV.5+ 天降光柱
@@ -1007,6 +1024,8 @@ export class Game {
 
   dispose() {
     this.player.dispose();
+    this.goblet?.dispose();
+    this.torches?.dispose();
     this.spells.dispose();
     this.spirits.dispose();
     this.edge.dispose();

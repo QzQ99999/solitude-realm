@@ -309,9 +309,10 @@ export class Player {
     this._dissolveFrom = new THREE.Vector3();
 
     /** 运行状态 */
-    this.position = new THREE.Vector3(0, 0, 0);
+    this.position = new THREE.Vector3();
     this.velocity = new THREE.Vector3();
-    this.facing = 0;
+    this.respawn(); // 站到出生点
+    this.obstacles = [];   // 柱基碰撞体 [{x,z,r}]（game 侧注入圣杯等）
     this._moveAmount = 0;
     this._bobT = 0;
     this._hover = 0; // 平滑归零的旧悬浮高度（保留供缓动）
@@ -433,6 +434,12 @@ export class Player {
     } catch (error) {
       console.error('[player] 角色模型装载失败', error);
     }
+  }
+
+  /** 回到出生点（开局 / 重新开始时调用）：南侧空地，面向场地中央。 */
+  respawn() {
+    this.position.set(0, 0, 12);
+    this.facing = Math.PI;
   }
 
   /* —— 公共接口 —— */
@@ -580,6 +587,18 @@ export class Player {
         const dx = aimPoint.x - this.position.x;
         const dz = aimPoint.z - this.position.z;
         if (dx * dx + dz * dz > 1) this._faceToward(Math.atan2(dx, dz), dt, combat ? 14 : 4);
+      }
+    }
+
+    // 柱基碰撞：陷入圣杯等障碍物时沿径向推出
+    for (const ob of this.obstacles) {
+      const dx = this.position.x - ob.x;
+      const dz = this.position.z - ob.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < ob.r * ob.r && d2 > 1e-6) {
+        const d = Math.sqrt(d2);
+        this.position.x = ob.x + (dx / d) * ob.r;
+        this.position.z = ob.z + (dz / d) * ob.r;
       }
     }
 

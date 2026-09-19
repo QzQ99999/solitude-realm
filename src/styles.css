@@ -1219,3 +1219,38 @@ body {
 .skill.is-cooling:hover .skill__name {
   opacity: 0.7;
 }
+
+/* ---- 英文标题标志（Cinzel Decorative · 中世纪奇幻碑文风，OFL 开源授权） ---- */
+@font-face {
+  font-family: 'Cinzel Decorative';
+  src: url('../fonts/CinzelDecorative-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
+.logo-en {
+  font-family: 'Cinzel Decorative', var(--f-latin);
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.04;
+  background: linear-gradient(180deg, #fdf3d3 0%, #eeda9e 38%, #d9b96a 64%, #a2813e 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.95)) drop-shadow(0 0 18px rgba(201, 169, 89, 0.45));
+  white-space: nowrap;
+}
+
+.logo-en .line { display: block; letter-spacing: 0.22em; text-indent: 0.22em; }
+
+/* 开始界面：主视觉大标志（英文大于中文） */
+#startScreen .logo-en .line { font-size: 92px; }
+#startScreen h1 { font-size: 42px; }
+
+/* 局内左上角：小标志（英文大于中文） */
+.hud-title .logo-en { margin: 0 0 3px; }
+.hud-title .logo-en .line { font-size: 25px; }
+.hud-title h1 { font-size: 16px; }
+.hud-title span { font-size: 10px; margin-top: 2px; }
