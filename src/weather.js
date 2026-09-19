@@ -411,7 +411,7 @@ export class Weather {
       if (anchor) system.obj.position.set(anchor.x, 0, anchor.z);
     }
 
-    /* 地面浓雾板 */
+    /* 地面浓雾板：固定于场地中心，不跟随玩家 */
     const fogTarget = this._primary === 'fog' ? 1 : 0;
     for (const layer of this._fogMaterials) {
       layer.intensity += (fogTarget - layer.intensity) * Math.min(1, dt * (fogTarget > layer.intensity ? 0.4 : 0.6));
@@ -422,7 +422,6 @@ export class Weather {
       layer.mesh.visible = true;
       layer.material.uniforms.uTime.value = elapsed;
       layer.material.uniforms.uIntensity.value = layer.intensity;
-      if (anchor) layer.mesh.position.set(anchor.x, layer.mesh.position.y, anchor.z);
     }
 
     /* 丁达尔光束：随浓雾淡入，亮度缓慢呼吸；固定于场地坐标，不跟随玩家 */
