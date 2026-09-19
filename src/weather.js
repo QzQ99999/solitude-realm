@@ -286,6 +286,7 @@ export class Weather {
     }
 
     /* —— 丁达尔光束（烈焰领域）：同一光源方向、互相平行的暖光柱，
+     *    圆柱体积（假体积光：法线朝向镜头处最亮，轮廓处自然衰减），
      *    固定在场地坐标里（不跟随玩家），缓慢呼吸 —— */
     {
       const RAY_COUNT = 9;
@@ -293,7 +294,8 @@ export class Weather {
       this._rayGroup = new THREE.Group();
       this._rayMaterials = [];
       for (let k = 0; k < RAY_COUNT; k++) {
-        const w = 2 + Math.random() * 3.6;
+        const rt = 1.3 + Math.random() * 1.1;  // 顶部半径
+        const rb = rt * (1.12 + Math.random() * 0.3); // 底部微张（光落进雾里摊开）
         const material = new THREE.ShaderMaterial({
           transparent: true,
           depthWrite: false,
@@ -307,10 +309,15 @@ export class Weather {
           },
           vertexShader: /* glsl */ `
             varying vec2 vUv;
+            varying vec3 vN;
+            varying vec3 vW;
             varying float vDist;
             void main() {
               vUv = uv;
-              vec4 mv = modelViewMatrix * vec4(position, 1.0);
+              vN = normalize(mat3(modelMatrix) * normal);
+              vec4 wp = modelMatrix * vec4(position, 1.0);
+              vW = wp.xyz;
+              vec4 mv = viewMatrix * wp;
               vDist = -mv.z;
               gl_Position = projectionMatrix * mv;
             }
@@ -320,6 +327,8 @@ export class Weather {
             uniform float uIntensity;
             uniform float uSeed;
             varying vec2 vUv;
+            varying vec3 vN;
+            varying vec3 vW;
             varying float vDist;
 
             float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -331,15 +340,20 @@ export class Weather {
             }
 
             void main() {
-              // 横向软边（光柱没有硬轮廓）
-              float edgeX = smoothstep(0.0, 0.38, vUv.x) * smoothstep(1.0, 0.62, vUv.x);
-              // 顶部最亮，向下渗入雾中渐灭
-              float grad = pow(vUv.y, 1.35) * smoothstep(0.0, 0.18, vUv.y);
-              // 缓慢流动的云隙闪烁（光柱里的尘埃在动）
-              float n = noise(vec2(vUv.x * 3.0 + uSeed, vUv.y * 1.6 - uTime * 0.05));
+              // 体积感核心：柱面正对镜头的水平方向最亮（视线穿过介质最厚），
+              // 轮廓处衰减为 0。只用水平分量——俯视/仰视都有圆柱体积感
+              vec3 V = normalize(cameraPosition - vW);
+              vec3 Vh = V - vec3(0.0, 1.0, 0.0) * dot(V, vec3(0.0, 1.0, 0.0));
+              float hl = length(Vh);
+              float facing = hl > 0.001 ? abs(dot(normalize(vN), Vh / hl)) : 1.0;
+              float body = pow(facing, 1.7);
+              // 上亮下不灭：高俯视相机主要看到光柱下半段，底部保留 35% 亮度
+              float grad = 0.35 + 0.65 * pow(vUv.y, 1.1);
+              // 环向缓慢流动的云隙闪烁（光柱里的尘埃在动）
+              float n = noise(vec2(vUv.x * 6.0 + uSeed, vUv.y * 1.6 - uTime * 0.05));
               n = 0.45 + 0.55 * n;
-              float a = edgeX * grad * n * uIntensity * 0.34;
-              a *= smoothstep(60.0, 16.0, vDist) * smoothstep(1.5, 6.0, vDist);
+              float a = body * grad * n * uIntensity * 0.3;
+              a *= smoothstep(75.0, 18.0, vDist) * smoothstep(1.5, 6.0, vDist);
               if (a < 0.004) discard;
               vec3 col = mix(vec3(1.0, 0.58, 0.26), vec3(1.0, 0.84, 0.58), n);
               gl_FragColor = vec4(col, a);
@@ -347,13 +361,15 @@ export class Weather {
             }
           `
         });
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, 19), material);
+        const mesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(rt, rb, 19, 28, 1, true),
+          material
+        );
         const ang = (k / RAY_COUNT) * Math.PI * 2 + Math.random() * 0.6;
         const rad = 10 + Math.random() * 40; // 铺满整个场地（固定于场地坐标）
         mesh.position.set(Math.sin(ang) * rad, 8.5, Math.cos(ang) * rad);
-        // ZYX 欧拉序：先随机朝向后统一倾斜 —— 倾斜在世界空间里同向，光束平行
+        // ZYX 欧拉序：统一倾斜 —— 倾斜在世界空间里同向，光束平行
         mesh.rotation.order = 'ZYX';
-        mesh.rotation.y = Math.random() * Math.PI;
         mesh.rotation.z = RAY_TILT;
         mesh.renderOrder = 6;
         mesh.frustumCulled = false;
