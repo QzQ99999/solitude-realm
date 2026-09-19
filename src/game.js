@@ -876,7 +876,7 @@ export class Game {
     this._updateCamera(dt);
 
     // 场地边缘感知：接近泛亮 → 顶边碰撞时波纹 + 火花 + HUD 提示
-    this.edge.update(dt, this.elapsed, this.player, this.world.currentAccent);
+    this.edge.update(dt, this.elapsed, this.player, this.world.currentAccent, this.world.liveFogFar);
     const pushing = this.player.edgePush > 0.3;
     this.hud.setEdgeHint(pushing);
     if (pushing) {

@@ -103,6 +103,56 @@ export class World {
 
     this.weather = new Weather(this.scene);
 
+    /* —— 大气雾墙：边界外一圈渐变雾柱（雾色、浓度随主题实时变化）。
+     * 场地边缘因此"沉"进大气层里，而不是一条硬边切到深渊 —— 空间更有纵深。 */
+    {
+      const hazeMaterial = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending,
+        fog: false,
+        side: THREE.BackSide, // 从场地内看向外面
+        uniforms: {
+          uColor: { value: new THREE.Color('#141c28') },
+          uOpacity: { value: 0.12 }
+        },
+        vertexShader: /* glsl */ `
+          varying vec2 vUv;
+          varying float vDist;
+          void main() {
+            vUv = uv;
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            vDist = -mv.z;
+            gl_Position = projectionMatrix * mv;
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform vec3 uColor;
+          uniform float uOpacity;
+          varying vec2 vUv;
+          varying float vDist;
+          void main() {
+            // 底浓顶淡：像贴地的大气层；极近处再淡出避免糊脸
+            float vert = pow(1.0 - vUv.y, 1.5);
+            float a = uOpacity * vert * smoothstep(24.0, 48.0, vDist);
+            if (a < 0.004) discard;
+            gl_FragColor = vec4(uColor, a);
+            #include <colorspace_fragment>
+          }
+        `
+      });
+      this.hazeWall = new THREE.Mesh(
+        new THREE.CylinderGeometry(70, 76, 22, 72, 1, true),
+        hazeMaterial
+      );
+      this.hazeWall.position.y = 6;
+      this.hazeWall.renderOrder = 1;
+      this.scene.add(this.hazeWall);
+    }
+
+    /** 实时雾距（过渡中逐帧更新，边界/雾墙随雾浓度呼吸）。 */
+    this.liveFogFar = this.fog.far;
+
     /** 当前领域 id。 */
     this.current = 'neutral';
     this.currentAccent = THEMES.neutral.accent;
@@ -188,7 +238,11 @@ export class World {
       case 'skyTop': this.sky.uniforms.uTop.value.copy(value); break;
       case 'skyBottom': this.sky.uniforms.uBottom.value.copy(value); break;
       case 'skyHorizon': this.sky.uniforms.uHorizon.value.copy(value); break;
-      case 'fogColor': this.fog.color.copy(value); this.ground.uniforms.uFog.value.copy(value); break;
+      case 'fogColor':
+        this.fog.color.copy(value);
+        this.ground.uniforms.uFog.value.copy(value);
+        this.hazeWall.material.uniforms.uColor.value.copy(value);
+        break;
       case 'groundBase': this.ground.uniforms.uBase.value.copy(value); break;
       case 'groundAccent': this.ground.uniforms.uAccent.value.copy(value); break;
       case 'keyColor': this.key.color.copy(value); break;
@@ -196,7 +250,14 @@ export class World {
       case 'hemiGround': this.hemi.groundColor.copy(value); break;
       case 'stars': this.sky.uniforms.uStars.value = value; break;
       case 'fogNear': this.fog.near = value; this.ground.uniforms.uFogNear.value = value; break;
-      case 'fogFar': this.fog.far = value; this.ground.uniforms.uFogFar.value = value; break;
+      case 'fogFar':
+        this.fog.far = value;
+        this.ground.uniforms.uFogFar.value = value;
+        this.liveFogFar = value;
+        // 雾墙浓度与雾距反向：雾越近（浓雾），墙越实——边界融进大气里
+        this.hazeWall.material.uniforms.uOpacity.value =
+          THREE.MathUtils.clamp(1.1 - value / 170, 0.1, 0.5);
+        break;
       case 'veinStrength': this.ground.uniforms.uVein.value = value; break;
       case 'keyIntensity': this.key.intensity = value; break;
       case 'hemiIntensity': this.hemi.intensity = value; break;

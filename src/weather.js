@@ -284,6 +284,82 @@ export class Weather {
         this._fogMaterials.push({ mesh, material, intensity: 0 });
       }
     }
+
+    /* —— 丁达尔光束（烈焰领域）：斜插进浓雾的暖光柱，缓慢旋转摇曳 —— */
+    {
+      const RAY_COUNT = 9;
+      this._rayGroup = new THREE.Group();
+      this._rayMaterials = [];
+      for (let k = 0; k < RAY_COUNT; k++) {
+        const w = 2 + Math.random() * 3.6;
+        const material = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          fog: false,
+          uniforms: {
+            uTime: { value: 0 },
+            uIntensity: { value: 0 },
+            uSeed: { value: Math.random() * 100 }
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vUv;
+            varying float vDist;
+            void main() {
+              vUv = uv;
+              vec4 mv = modelViewMatrix * vec4(position, 1.0);
+              vDist = -mv.z;
+              gl_Position = projectionMatrix * mv;
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uIntensity;
+            uniform float uSeed;
+            varying vec2 vUv;
+            varying float vDist;
+
+            float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+            float noise(vec2 p) {
+              vec2 i = floor(p); vec2 f = fract(p);
+              vec2 u = f * f * (3.0 - 2.0 * f);
+              return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                         mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+            }
+
+            void main() {
+              // 横向软边（光柱没有硬轮廓）
+              float edgeX = smoothstep(0.0, 0.38, vUv.x) * smoothstep(1.0, 0.62, vUv.x);
+              // 顶部最亮，向下渗入雾中渐灭
+              float grad = pow(vUv.y, 1.35) * smoothstep(0.0, 0.18, vUv.y);
+              // 缓慢流动的云隙闪烁（光柱里的尘埃在动）
+              float n = noise(vec2(vUv.x * 3.0 + uSeed, vUv.y * 1.6 - uTime * 0.05));
+              n = 0.45 + 0.55 * n;
+              float a = edgeX * grad * n * uIntensity * 0.34;
+              a *= smoothstep(60.0, 16.0, vDist) * smoothstep(1.5, 6.0, vDist);
+              if (a < 0.004) discard;
+              vec3 col = mix(vec3(1.0, 0.58, 0.26), vec3(1.0, 0.84, 0.58), n);
+              gl_FragColor = vec4(col, a);
+              #include <colorspace_fragment>
+            }
+          `
+        });
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, 19), material);
+        const ang = (k / RAY_COUNT) * Math.PI * 2 + Math.random() * 0.6;
+        const rad = 9 + Math.random() * 21;
+        mesh.position.set(Math.sin(ang) * rad, 8.5, Math.cos(ang) * rad);
+        mesh.rotation.y = Math.random() * Math.PI;
+        mesh.userData.baseTilt = 0.2 + Math.random() * 0.14; // 光束从竖直方向斜插
+        mesh.rotation.z = mesh.userData.baseTilt;
+        mesh.renderOrder = 6;
+        mesh.frustumCulled = false;
+        mesh.visible = false;
+        this._rayGroup.add(mesh);
+        this._rayMaterials.push({ mesh, material, intensity: 0 });
+      }
+      scene.add(this._rayGroup);
+    }
   }
 
   /** 主天气 + 副天气（副天气强度 damp 到 0.55）。'fog' 作用于地面雾板。 */
@@ -329,6 +405,21 @@ export class Weather {
       layer.material.uniforms.uIntensity.value = layer.intensity;
       if (anchor) layer.mesh.position.set(anchor.x, layer.mesh.position.y, anchor.z);
     }
+
+    /* 丁达尔光束：随浓雾淡入，呼吸 + 摇曳 + 整组缓慢旋转 */
+    this._rayPhase = (this._rayPhase ?? 0) + (fogTarget - (this._rayPhase ?? 0)) * Math.min(1, dt * 0.35);
+    for (const [k, layer] of this._rayMaterials.entries()) {
+      if (this._rayPhase < 0.004) {
+        layer.mesh.visible = false;
+        continue;
+      }
+      layer.mesh.visible = true;
+      layer.material.uniforms.uTime.value = elapsed;
+      layer.material.uniforms.uIntensity.value = this._rayPhase * (0.8 + 0.2 * Math.sin(elapsed * 0.35 + k * 2.1));
+      layer.mesh.rotation.z = layer.mesh.userData.baseTilt + Math.sin(elapsed * 0.1 + k * 1.7) * 0.035;
+    }
+    this._rayGroup.rotation.y = elapsed * 0.01;
+    if (anchor) this._rayGroup.position.set(anchor.x, 0, anchor.z);
   }
 
   dispose() {
@@ -344,5 +435,11 @@ export class Weather {
       layer.material.dispose();
     }
     this._fogMaterials.length = 0;
+    for (const layer of this._rayMaterials) {
+      layer.mesh.geometry.dispose();
+      layer.material.dispose();
+    }
+    this.scene.remove(this._rayGroup);
+    this._rayMaterials.length = 0;
   }
 }

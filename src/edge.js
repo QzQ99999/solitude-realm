@@ -24,7 +24,8 @@ export class EdgeBoundary {
       uProximity: { value: 0 }, // 接近程度 0~1
       uPush: { value: 0 }, // 顶边强度 0~1
       uHit: { value: 0 }, // 碰撞冲击 1→0（JS 侧衰减，驱动波纹扩散）
-      uDir: { value: new THREE.Vector2(0, -1) } // 玩家方位（环局部平面坐标）
+      uDir: { value: new THREE.Vector2(0, -1) }, // 玩家方位（环局部平面坐标）
+      uDim: { value: 1 } // 雾天淡化系数 0~1（浓雾里边界隐入雾中，不再是一条硬线）
     };
 
     const material = new THREE.ShaderMaterial({
@@ -47,6 +48,7 @@ export class EdgeBoundary {
         uniform float uPush;
         uniform float uHit;
         uniform vec2 uDir;
+        uniform float uDim;
         varying vec2 vLocal;
 
         const float TAU = 6.28318530718;
@@ -70,10 +72,11 @@ export class EdgeBoundary {
           float d1 = angToPlayer / 0.85;
           float sideArc = exp(-d1 * d1);
 
-          // 分层亮度
-          float base = band * (0.05 + 0.16 * uProximity) * (0.4 + 0.6 * ticks);
-          base += band * majors * (0.05 + 0.08 * uProximity);
-          float glow = band * sideArc * uProximity * 0.3;
+          // 分层亮度（常驻亮度按雾天淡化系数收敛，让边界隐入雾中；
+          // 接近泛光/顶边/碰撞波纹保持强度——玩法反馈不打折）
+          float base = band * (0.05 + 0.16 * uProximity) * (0.4 + 0.6 * ticks) * uDim;
+          base += band * majors * (0.05 + 0.08 * uProximity) * uDim;
+          float glow = band * sideArc * uProximity * 0.3 * mix(uDim, 1.0, 0.6);
           float push = band * sideArc * uPush * (0.55 + 0.25 * sin(uTime * 16.0));
 
           // 碰撞冲击波纹：uHit 1→0 期间，弧形波从边界向场地内扩散
@@ -128,8 +131,9 @@ export class EdgeBoundary {
    * @param {number} elapsed
    * @param {import('./player.js').Player} player 读取 edgePush / edgeProximity / edgeAngle
    * @param {string} accent 当前主题强调色
+   * @param {number} [fogFar] 当前世界的实时雾距（浓雾时边界自动隐入雾中）
    */
-  update(dt, elapsed, player, accent) {
+  update(dt, elapsed, player, accent, fogFar = 235) {
     const u = this.uniforms;
     u.uTime.value = elapsed;
     u.uProximity.value = player.edgeProximity;
@@ -137,6 +141,11 @@ export class EdgeBoundary {
 
     // 冲击衰减：约 0.5 秒走完一圈向内扩散的波纹
     u.uHit.value = Math.max(0, u.uHit.value - dt * 2.1);
+
+    // 雾天淡化：fogFar 45~150 映射到 0.12~1（烈焰浓雾里边界只剩隐约一线）
+    const dim = THREE.MathUtils.smoothstep(fogFar, 45, 150);
+    const fogDim = 0.12 + 0.88 * dim;
+    u.uDim.value += (fogDim - u.uDim.value) * Math.min(1, dt * 1.5);
 
     // 玩家方位 → 环局部平面坐标（rotation.x=-π/2：local(x,y) → world(x,-y)）
     const px = player.position.x;
@@ -149,7 +158,8 @@ export class EdgeBoundary {
     this._colorTarget.set(accent);
     u.uColor.value.lerp(this._colorTarget, Math.min(1, dt * 3));
     this.pylonMaterial.color.copy(u.uColor.value);
-    this.pylonMaterial.opacity = 0.2 + 0.16 * player.edgeProximity + 0.14 * Math.sin(elapsed * 2.2) * 0.5;
+    this.pylonMaterial.opacity = (0.2 + 0.16 * player.edgeProximity + 0.14 * Math.sin(elapsed * 2.2) * 0.5)
+      * (0.3 + 0.7 * u.uDim.value);
   }
 
   dispose() {
