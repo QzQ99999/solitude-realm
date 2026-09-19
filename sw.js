@@ -1,7 +1,7 @@
 /* sw.js — 孤独领域资源缓存。
  * 对大体量资源（场景 GLB / Draco 解码器 / 构建产物）做 cache-first：
  * 首次访问下载后，再次访问即时加载。更新游戏时把 CACHE 版本号 +1 即可。 */
-const CACHE = 'solitude-realm-v5';
+const CACHE = 'solitude-realm-v6';
 const CACHEABLE = /arena\.glb|draco\/|assets\/|fonts\//;
 
 self.addEventListener('install', (event) => {
