@@ -285,9 +285,11 @@ export class Weather {
       }
     }
 
-    /* —— 丁达尔光束（烈焰领域）：斜插进浓雾的暖光柱，缓慢旋转摇曳 —— */
+    /* —— 丁达尔光束（烈焰领域）：同一光源方向、互相平行的暖光柱，
+     *    固定在场地坐标里（不跟随玩家），缓慢呼吸 —— */
     {
       const RAY_COUNT = 9;
+      const RAY_TILT = 0.16; // 统一倾角：所有光束平行，像来自同一光源
       this._rayGroup = new THREE.Group();
       this._rayMaterials = [];
       for (let k = 0; k < RAY_COUNT; k++) {
@@ -347,11 +349,12 @@ export class Weather {
         });
         const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, 19), material);
         const ang = (k / RAY_COUNT) * Math.PI * 2 + Math.random() * 0.6;
-        const rad = 9 + Math.random() * 21;
+        const rad = 10 + Math.random() * 40; // 铺满整个场地（固定于场地坐标）
         mesh.position.set(Math.sin(ang) * rad, 8.5, Math.cos(ang) * rad);
+        // ZYX 欧拉序：先随机朝向后统一倾斜 —— 倾斜在世界空间里同向，光束平行
+        mesh.rotation.order = 'ZYX';
         mesh.rotation.y = Math.random() * Math.PI;
-        mesh.userData.baseTilt = 0.2 + Math.random() * 0.14; // 光束从竖直方向斜插
-        mesh.rotation.z = mesh.userData.baseTilt;
+        mesh.rotation.z = RAY_TILT;
         mesh.renderOrder = 6;
         mesh.frustumCulled = false;
         mesh.visible = false;
@@ -406,7 +409,7 @@ export class Weather {
       if (anchor) layer.mesh.position.set(anchor.x, layer.mesh.position.y, anchor.z);
     }
 
-    /* 丁达尔光束：随浓雾淡入，呼吸 + 摇曳 + 整组缓慢旋转 */
+    /* 丁达尔光束：随浓雾淡入，亮度缓慢呼吸；固定于场地坐标，不跟随玩家 */
     this._rayPhase = (this._rayPhase ?? 0) + (fogTarget - (this._rayPhase ?? 0)) * Math.min(1, dt * 0.35);
     for (const [k, layer] of this._rayMaterials.entries()) {
       if (this._rayPhase < 0.004) {
@@ -416,10 +419,7 @@ export class Weather {
       layer.mesh.visible = true;
       layer.material.uniforms.uTime.value = elapsed;
       layer.material.uniforms.uIntensity.value = this._rayPhase * (0.8 + 0.2 * Math.sin(elapsed * 0.35 + k * 2.1));
-      layer.mesh.rotation.z = layer.mesh.userData.baseTilt + Math.sin(elapsed * 0.1 + k * 1.7) * 0.035;
     }
-    this._rayGroup.rotation.y = elapsed * 0.01;
-    if (anchor) this._rayGroup.position.set(anchor.x, 0, anchor.z);
   }
 
   dispose() {
