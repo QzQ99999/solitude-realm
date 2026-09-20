@@ -160,6 +160,23 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 10;
+  transition: opacity 0.45s ease;
+}
+
+/* 开始界面：全部游戏内 UI 隐藏，只留标题与开始按钮 */
+#hud.is-hidden {
+  opacity: 0;
+}
+
+#hud.is-hidden .panel,
+#hud.is-hidden .skills,
+#hud.is-hidden .world-badge,
+#hud.is-hidden .lock-hint,
+#hud.is-hidden .edge-hint,
+#hud.is-hidden .toast,
+#hud.is-hidden .hud-title,
+#hud.is-hidden button {
+  pointer-events: none;
 }
 
 /* ---- 雕饰面板：黑曜石底 + 古金细框 + 角饰 ---- */
@@ -587,6 +604,7 @@ body {
 }
 
 /* ---- 开始界面 ---- */
+/* 无半透明底：右侧留给教徒半身像（3D 视口层），文字排在左侧 */
 
 #startScreen {
   position: fixed;
@@ -594,16 +612,54 @@ body {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   gap: 14px;
-  background: radial-gradient(ellipse at center, rgba(10, 11, 18, 0.72) 0%, rgba(3, 4, 7, 0.96) 100%);
-  transition: opacity 0.6s ease;
+  padding-left: 9vw;
+  text-align: left;
+  will-change: transform, opacity;
+  transition:
+    opacity 0.7s ease,
+    transform 0.78s cubic-bezier(0.55, 0, 0.85, 0.36);
+}
+
+#startScreen.is-leaving {
+  pointer-events: none;
+}
+
+/* 点击开始：按钮立即消失，标题/字幕/提示从左侧滑出 */
+#startScreen.is-leaving #startBtn {
+  display: none;
+}
+
+#startScreen.is-leaving .start-inner {
+  transform: translateX(-60vw);
+  opacity: 0;
+  transition:
+    transform 0.9s cubic-bezier(0.6, 0, 0.85, 0.35),
+    opacity 0.75s ease;
 }
 
 #startScreen.is-hidden {
   opacity: 0;
   pointer-events: none;
+}
+
+/* 视差内层：与英文大标题中轴对齐（标题最宽，其余元素沿其中轴线居中），
+   每帧写入 transform 不影响容器的进出场过渡 */
+#startScreen .start-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  will-change: transform;
+}
+
+#startScreen h1,
+#startScreen .sub,
+#startScreen .tips,
+#startScreen .logo-en .line {
+  text-shadow: none; /* 渐变裁切文字不吃深色投影，发暗；光晕由 .logo-en 的 filter 提供 */
 }
 
 /* 雕花横饰：金线 + 中央菱形 */
@@ -638,13 +694,13 @@ body {
   text-indent: 0.3em;
   font-weight: 400;
   line-height: 1.15;
-  background: linear-gradient(180deg, #f8efce 0%, #ecd9a0 30%, #c9a959 55%, #8a6d3b 78%, #ecd9a0 100%);
+  background: linear-gradient(180deg, #fffbec 0%, #f9ecc0 28%, #eed488 52%, #d4ad5c 76%, #f4e2a8 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   filter:
     drop-shadow(0 2px 0 rgba(0, 0, 0, 0.9))
-    drop-shadow(0 0 34px rgba(201, 169, 89, 0.4));
+    drop-shadow(0 0 34px rgba(240, 210, 130, 0.55));
 }
 
 #startScreen .sub {
@@ -819,6 +875,35 @@ body {
   font-size: 32px;
   color: var(--gold-hi);
   font-variant-numeric: tabular-nums;
+}
+
+/* 评级称号：难度挡位对应（LV1~LV10 各一个称号） */
+#gameOverScreen .go-rank {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-top: 2px;
+  padding: 9px 26px;
+  border-top: 1px solid rgba(201, 169, 89, 0.3);
+  border-bottom: 1px solid rgba(201, 169, 89, 0.3);
+}
+
+#gameOverScreen .go-rank__lv {
+  font-family: var(--f-latin);
+  font-size: 15px;
+  letter-spacing: 0.22em;
+  color: rgba(216, 205, 178, 0.75);
+}
+
+#gameOverScreen .go-rank__title {
+  font-family: var(--f-display);
+  font-size: 27px;
+  letter-spacing: 0.24em;
+  background: linear-gradient(180deg, #f8efce 0%, #ecd9a0 35%, #c9a959 70%, #ecd9a0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.9)) drop-shadow(0 0 20px rgba(201, 169, 89, 0.45));
 }
 
 #gameOverScreen .go-actions {
@@ -1235,11 +1320,11 @@ body {
   flex-direction: column;
   align-items: center;
   line-height: 1.04;
-  background: linear-gradient(180deg, #fdf3d3 0%, #eeda9e 38%, #d9b96a 64%, #a2813e 100%);
+  background: linear-gradient(180deg, #fffbe9 0%, #fdf0c2 32%, #f0d488 62%, #d9b96a 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.95)) drop-shadow(0 0 18px rgba(201, 169, 89, 0.45));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.9)) drop-shadow(0 0 24px rgba(240, 214, 140, 0.6));
   white-space: nowrap;
 }
 

@@ -18,7 +18,8 @@ const MODELS = [
   { fbx: 'Meshy_AI_Arcane_Lantern_0919203250_texture_fbx/Meshy_AI_Arcane_Lantern_0919203250_texture.fbx', out: 'lantern.glb', err: 0.012 },
   { fbx: 'Meshy_AI_Icebound_Lich_0919205910_texture_fbx/Meshy_AI_Icebound_Lich_0919205910_texture.fbx', out: 'lich.glb', err: 0.002 },
   { fbx: 'Meshy_AI_Infernal_Gourd_Hall_0920035725_texture_fbx/Meshy_AI_Infernal_Gourd_Hall_0920035725_texture.fbx', out: 'fire.glb', err: 0.002 },
-  { fbx: 'Meshy_AI_The_Binding_of_Ipos_0919210214_texture_fbx/Meshy_AI_The_Binding_of_Ipos_0919210214_texture.fbx', out: 'ipos.glb', err: 0.004 }
+  { fbx: 'Meshy_AI_The_Binding_of_Ipos_0919210214_texture_fbx/Meshy_AI_The_Binding_of_Ipos_0919210214_texture.fbx', out: 'ipos.glb', err: 0.004 },
+  { fbx: 'Meshy_AI_Meshy_AI_Skull_Clan_C_0920090019_texture_fbx/Meshy_AI_Meshy_AI_Skull_Clan_C_0920090019_texture.fbx', out: 'cultist.glb', err: 0.0002, tex: 4096 }
 ];
 // 命令行过滤：node scripts/convert-spirits.mjs fire 只转 fire.glb
 const only = process.argv[2];
@@ -36,7 +37,9 @@ for (const m of only ? MODELS.filter((x) => x.out.startsWith(only)) : MODELS) {
   await doc.transform(dedup(), weld(), prune());
   await MeshoptSimplifier.ready;
   await doc.transform(simplify({ simplifier: MeshoptSimplifier, error: m.err }));
-  await doc.transform(textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [1024, 1024] }));
+  // 半身像等特写模型可用 tex: 2048 保住贴图精度
+  const tex = m.tex ?? 1024;
+  await doc.transform(textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [tex, tex] }));
   await doc.transform(quantize());
   await io.write(path.join(OUT, m.out), doc);
   fs.rmSync(tmp, { force: true });

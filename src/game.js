@@ -11,6 +11,7 @@ import { PillarField } from './pillars.js';
 import { Goblet, GOBLET_COLLIDER_RADIUS, GOBLET_POSITION } from './goblet.js';
 import { TorchRing } from './torches.js';
 import { VFXSystem } from './vfx/VFXSystem.js';
+import { PortraitStage } from './startscreen.js';
 import { audio } from './audio.js';
 import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES, NEUTRAL_FLAME_COLOR } from './themes.js';
 
@@ -63,6 +64,13 @@ export class Game {
     this.flightTrail = new FlightTrail(this.scene); // Shift 飞行拖尾光带
     this.pillars = new PillarField(this.scene, (dmg) => this._onPlayerHit(dmg), this.vfx); // LV.3+ 天降光柱
     this.hud = new HUD();
+    this.hud.setChrome(false); // 开始界面只留标题与开始按钮，游戏内 UI 全部隐藏
+    // 开始界面右侧的教徒半身像（独立场景视口渲染，带鼠标视差与杯中白焰）
+    this.portrait = new PortraitStage(this.renderer);
+    this.portrait.resize(window.innerWidth, window.innerHeight);
+    // 开始界面鼠标视差（仅指针驱动；按键不影响）
+    this._parallax = { x: 0, y: 0 };
+    this._parallaxCur = { x: 0, y: 0 };
     // 之灵数量随分数增长的目标值（初始温和，逐步提升）
     this._normalTarget = 3;
     this._specialTarget = 1;
@@ -247,6 +255,7 @@ export class Game {
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
+      this.portrait.resize(window.innerWidth, window.innerHeight);
       this._applyPixelRatio();
     });
 
@@ -273,6 +282,9 @@ export class Game {
     // 锁定时：滑动=转视角，按住右键滑动=移动落点（视角冻结）。
     // 未锁定时保留真实指针模式：指针位置即瞄准点，滑动转视角（到屏幕边缘会停）。
     window.addEventListener('pointermove', (event) => {
+      // 开始界面的鼠标视差输入（仅指针；按键不影响）——在任何 early return 之前采集
+      this._parallax.x = (event.clientX / window.innerWidth) * 2 - 1;
+      this._parallax.y = -((event.clientY / window.innerHeight) * 2 - 1);
       if (!this.started || this.over) return;
       const mx = event.movementX ?? 0;
       const my = event.movementY ?? 0;
@@ -405,6 +417,8 @@ export class Game {
     audio.startMusic(); // 背景音乐（ Chillhop 循环）
     this.started = true;
     this.paused = false;
+    this.hud.setChrome(true); // 进入游戏：显示游戏内 UI
+    this.portrait.leave(); // 半身像向右滑出 + 推近：与游戏画面的视差滚动衔接
     this.player.respawn(); // 出生点重置（避开中央圣杯）
     this.hud.hidePause();
     this.hud.hideStartScreen();
@@ -473,7 +487,7 @@ export class Game {
     // 解除鼠标锁定，光标立即出现以便点击按钮
     if (document.pointerLockElement) document.exitPointerLock();
     this.hud.setLockHint(false);
-    this.hud.showGameOver(this.score);
+    this.hud.showGameOver(this.score, this.tier);
   }
 
   /** 重新开始：重置血量/分数/之灵，直接进入新一局。 */
@@ -537,6 +551,9 @@ export class Game {
     this.spells.reset();
     this.spirits.setFrozen(false);
     this.spirits.reset();
+    this.hud.setChrome(false); // 回到开始界面：隐藏游戏内 UI
+    this.portrait.show(); // 恢复开始界面半身像
+    this._parallax.x = this._parallax.y = 0;
     this.world.shift('neutral', this.player.position);
     this.hud.setScore(0);
     this.hud.setHealth(100);
@@ -752,11 +769,16 @@ export class Game {
 
   _updateCamera(dt) {
     const { yaw, pitch, dist } = this.orbit;
+    // 开始界面：鼠标视差轻微转动镜头（仅指针驱动；进入游戏后归零）
+    const yawOff = this.started ? 0 : this._parallaxCur.x * 0.1;
+    const pitchOff = this.started ? 0 : this._parallaxCur.y * 0.05;
+    const yawP = yaw + yawOff;
+    const pitchP = Math.max(0.2, pitch + pitchOff);
     const target = this._cameraTarget ?? (this._cameraTarget = new THREE.Vector3());
     target.set(
-      this.player.position.x + Math.sin(yaw) * Math.cos(pitch) * dist,
-      Math.sin(pitch) * dist + 1.4,
-      this.player.position.z + Math.cos(yaw) * Math.cos(pitch) * dist
+      this.player.position.x + Math.sin(yawP) * Math.cos(pitchP) * dist,
+      Math.sin(pitchP) * dist + 1.4,
+      this.player.position.z + Math.cos(yawP) * Math.cos(pitchP) * dist
     );
 
     // 震动
@@ -1021,7 +1043,25 @@ export class Game {
       this.hud.setCooldown(element, this.cooldowns.get(element) ?? 0, COOLDOWNS[element]);
     }
 
+    // 开始界面整层不透明：跳过主场景渲染（省一半渲染），只画半身像层；
+    // 退场开始后恢复主场景渲染，背景幕布原地渐隐透出游戏画面
+    if (!this.started && this.portrait.active) {
+      const pk = Math.min(1, dt * 5);
+      this._parallaxCur.x += (this._parallax.x - this._parallaxCur.x) * pk;
+      this._parallaxCur.y += (this._parallax.y - this._parallaxCur.y) * pk;
+      this.portrait.setParallax(this._parallaxCur.x, this._parallaxCur.y); // 模型跟随鼠标的旋转/平移视差
+      this.portrait.update(dt, this.elapsed);
+      this.portrait.render(this.renderer);
+      return;
+    }
+
     this.renderer.render(this.scene, this.camera);
+    const pk2 = Math.min(1, dt * 5);
+    this._parallaxCur.x += (this._parallax.x - this._parallaxCur.x) * pk2;
+    this._parallaxCur.y += (this._parallax.y - this._parallaxCur.y) * pk2;
+    this.portrait.setParallax(this._parallaxCur.x, this._parallaxCur.y);
+    this.portrait.update(dt, this.elapsed);
+    this.portrait.render(this.renderer);
   }
 
   dispose() {

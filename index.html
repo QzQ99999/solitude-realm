@@ -8,8 +8,6 @@
 <body>
   <canvas id="app"></canvas>
 
-  <canvas id="app"></canvas>
-
   <div id="vignette"></div>
   <div id="castFlash"></div>
   <div id="gothicFrame" aria-hidden="true"></div>
@@ -18,6 +16,10 @@
   <div id="gameOverScreen" class="is-hidden">
     <h1>游戏结束</h1>
     <p class="go-score">本局得分 <b id="finalScore">0</b></p>
+    <div class="go-rank">
+      <span class="go-rank__lv" id="finalRankLv">LV.1</span>
+      <span class="go-rank__title" id="finalRank">荒原过客</span>
+    </div>
     <div class="go-actions">
       <button id="backToStartBtn">返回初始界面</button>
     </div>
@@ -50,14 +52,13 @@
   </div>
 
   <div id="startScreen">
-    <div class="orn" aria-hidden="true"></div>
-    <div class="logo-en"><span class="line">SOLITUDE</span><span class="line">REALM</span></div>
-    <h1>孤独领域</h1>
-    <p class="sub">元素竞技场 · 施放法术，改写整个世界</p>
-    <button id="startBtn" disabled>场景装载中…</button>
-    <p class="tips">WASD 移动 · Q/E/R 技能 · 左键普攻 · 右键技能 · Shift 飞行 · H 查看</p>
-    <div class="orn flip" aria-hidden="true"></div>
-    <p class="tips" style="opacity:0.45">build 0917-A · 孤独领域版</p>
+    <div class="start-inner">
+      <div class="logo-en"><span class="line">SOLITUDE</span><span class="line">REALM</span></div>
+      <h1>孤独领域</h1>
+      <p class="sub">元素竞技场 · 施放法术，改写整个世界</p>
+      <button id="startBtn" disabled>场景装载中…</button>
+      <p class="tips">WASD 移动 · Q/E/R 技能 · 左键普攻 · 右键技能 · Shift 飞行 · H 查看</p>
+    </div>
   </div>
 
   <div id="hud">

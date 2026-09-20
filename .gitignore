@@ -5,3 +5,4 @@ Thumbs.db
 *.log
 .vite/
 public/character/*.fbx
+ghpages-deploy/

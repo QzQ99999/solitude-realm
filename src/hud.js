@@ -1,3 +1,17 @@
+/** 结束页面评级称号：按难度挡位（LV1~LV10）各一个。 */
+const RANK_TITLES = [
+  '荒原过客',
+  '驱灵学徒',
+  '缚灵猎人',
+  '秘法游侠',
+  '元素使徒',
+  '圣杯侍祭',
+  '荒原守卫',
+  '领域主宰',
+  '高阶元素使',
+  '孤独领域传说'
+];
+
 /**
  * hud.js — DOM 界面：世界徽章、提示、分数、技能卡冷却。
  */
@@ -9,6 +23,8 @@ export class HUD {
     this.lockHint = document.getElementById('lockHint');
     this.lockHint.classList.add('is-hidden'); // 游戏开始前不显示
     this.startScreen = document.getElementById('startScreen');
+    this.startInner = this.startScreen.querySelector('.start-inner');
+    this.hudEl = document.getElementById('hud');
     this.healthFill = document.getElementById('healthFill');
     this.healthNum = document.getElementById('healthNum');
     this.healthPanel = document.querySelector('.hud-health');
@@ -126,14 +142,22 @@ export class HUD {
     }
   }
 
-  /** 游戏正式开始：隐藏开始画面。 */
+  /** 游戏正式开始：开始界面整层向左滑出（半身像层同时向右滑出，视差滚动衔接）。 */
   hideStartScreen() {
-    this.startScreen.classList.add('is-hidden');
+    this.startScreen.classList.add('is-leaving');
+    clearTimeout(this._startHideT);
+    this._startHideT = setTimeout(() => this.startScreen.classList.add('is-hidden'), 780);
   }
 
   /** 返回初始界面：重新显示开始画面。 */
   showStartScreen() {
-    this.startScreen.classList.remove('is-hidden');
+    clearTimeout(this._startHideT);
+    this.startScreen.classList.remove('is-hidden', 'is-leaving');
+  }
+
+  /** 开始界面隐藏全部游戏内 UI（生命/体力/FPS/技能卡/徽章等），只留标题与开始按钮。 */
+  setChrome(visible) {
+    this.hudEl?.classList.toggle('is-hidden', !visible);
   }
 
   /** 生命条：宽度随血量收缩，颜色由绿转红。 */
@@ -163,9 +187,15 @@ export class HUD {
     this.pauseScreen.classList.add('is-hidden');
   }
 
-  /** 游戏结束画面。 */
-  showGameOver(score) {
+  /** 游戏结束画面：得分 + 难度挡位对应的评级称号（LV1~LV10 各一个）。 */
+  showGameOver(score, tier = 1) {
     this.finalScore.textContent = score;
+    const rank = Math.max(1, Math.min(RANK_TITLES.length, tier | 0));
+    const rankEl = document.getElementById('finalRank');
+    if (rankEl) {
+      rankEl.textContent = `${RANK_TITLES[rank - 1]}`;
+      document.getElementById('finalRankLv').textContent = `LV.${rank}`;
+    }
     this.gameOverScreen.classList.remove('is-hidden');
   }
 
