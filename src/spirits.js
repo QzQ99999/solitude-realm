@@ -26,7 +26,7 @@ const TOUCH_DAMAGE_SPECIAL = 50; // 特殊之灵撞到玩家扣的血
 
 /* 特殊之灵的显示强调色：冰属性加深为更饱和的钴蓝，
  * 与浅蓝的普通缚灵拉开区分；未列出的元素沿用领域主题色。 */
-const SPECIAL_ACCENTS = { ice: '#2f7dff' };
+export const SPECIAL_ACCENTS = { ice: '#2f7dff' };
 const SPAWN_MIN_RANGE = 20; // 生成时距离角色的最小距离（米）
 
 /* 特殊之灵模型朝向：始终面向角色（移动方向即追击方向），平滑转身、不自转。

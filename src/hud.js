@@ -181,10 +181,17 @@ export class HUD {
   /** 暂停 / 继续界面。 */
   showPause() {
     this.pauseScreen.classList.remove('is-hidden');
+    this.showcase?.show(); // 敌方图鉴 3D 展示随暂停页启停
   }
 
   hidePause() {
     this.pauseScreen.classList.add('is-hidden');
+    this.showcase?.hide();
+  }
+
+  /** 注入敌方图鉴 3D 展示台（由 Game 构造后挂入）。 */
+  setShowcase(showcase) {
+    this.showcase = showcase;
   }
 
   /** 游戏结束画面：得分 + 难度挡位对应的评级称号（LV1~LV10 各一个）。 */

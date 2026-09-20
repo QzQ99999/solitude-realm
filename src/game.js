@@ -12,6 +12,7 @@ import { Goblet, GOBLET_COLLIDER_RADIUS, GOBLET_POSITION } from './goblet.js';
 import { TorchRing } from './torches.js';
 import { VFXSystem } from './vfx/VFXSystem.js';
 import { PortraitStage } from './startscreen.js';
+import { SpiritShowcase } from './bestiary.js';
 import { audio } from './audio.js';
 import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES, NEUTRAL_FLAME_COLOR } from './themes.js';
 
@@ -68,6 +69,9 @@ export class Game {
     // 开始界面右侧的教徒半身像（独立场景视口渲染，带鼠标视差与杯中白焰）
     this.portrait = new PortraitStage(this.renderer);
     this.portrait.resize(window.innerWidth, window.innerHeight);
+    // 暂停界面「敌方图鉴」：独立透明画布展示四位敌人模型（可拖动旋转）
+    this.bestiary = new SpiritShowcase(document.getElementById('bestiaryCanvas'));
+    this.hud.setShowcase(this.bestiary);
     // 开始界面鼠标视差（仅指针驱动；按键不影响）
     this._parallax = { x: 0, y: 0 };
     this._parallaxCur = { x: 0, y: 0 };
@@ -256,6 +260,7 @@ export class Game {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.portrait.resize(window.innerWidth, window.innerHeight);
+      this.bestiary.resize(); // 图鉴格子矩形随布局变化，重算 scissor 视口
       this._applyPixelRatio();
     });
 
@@ -1068,6 +1073,7 @@ export class Game {
     this.player.dispose();
     this.goblet?.dispose();
     this.torches?.dispose();
+    this.bestiary?.dispose();
     this.spells.dispose();
     this.spirits.dispose();
     this.edge.dispose();

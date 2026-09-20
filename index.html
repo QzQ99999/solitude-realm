@@ -28,24 +28,60 @@
 
   <div id="pauseScreen" class="is-hidden">
     <h1>已暂停</h1>
-    <div class="pause-cols">
-      <div class="pause-col">
-        <h2>操作</h2>
-        <p><strong>W A S D</strong> 移动</p>
-        <p><strong>滑动鼠标</strong> 旋转视角 · <strong>滚轮</strong> 缩放</p>
-        <p><strong>Q / E / R</strong> 选择技能（冷却 5 秒）</p>
-        <p><strong>按住右键</strong> 瞄准 · <strong>松开</strong> 释放技能</p>
-        <p><strong>按住左键</strong> 普通攻击（元素箭）</p>
-        <p><strong>Shift</strong> 贴地飞行 · <strong>Esc</strong> 暂停/继续</p>
+    <div class="pause-layout">
+      <div class="pause-left">
+        <div class="pause-col">
+          <h2>操作</h2>
+          <p><strong>W A S D</strong> 移动</p>
+          <p><strong>滑动鼠标</strong> 旋转视角 · <strong>滚轮</strong> 缩放</p>
+          <p><strong>Q / E / R</strong> 选择技能（冷却 5 秒）</p>
+          <p><strong>按住右键</strong> 瞄准 · <strong>松开</strong> 释放技能</p>
+          <p><strong>按住左键</strong> 普通攻击（元素箭）</p>
+          <p><strong>Shift</strong> 贴地飞行 · <strong>Esc</strong> 暂停/继续</p>
+        </div>
+        <div class="pause-col">
+          <h2>机制</h2>
+          <p>元素之灵生成后永久追击：普撞 -25%，特殊撞 -50%</p>
+          <p>特殊之灵需<strong>对应元素技能</strong>清除；或在<strong>同色领域</strong>内普攻 3 次（+30 分 +10% 生命）</p>
+          <p><strong>生命恢复</strong>：连续清除 9 个普通之灵 +20% 生命（满生命时隐藏 · 被撞清零 · 技能清除不触发恢复）</p>
+          <p><strong>体力</strong>：飞行 6 秒清零、耗尽禁飞，9 秒回满</p>
+          <p><strong>难度</strong>：每 100 分升一档（右上角 LV），最高 10 档 12+6 满配</p>
+          <p>受击后 1.5 秒无敌帧 · 生命归零游戏结束</p>
+        </div>
       </div>
-      <div class="pause-col">
-        <h2>机制</h2>
-        <p>元素之灵生成后永久追击：普撞 -25%，特殊撞 -50%</p>
-        <p>特殊之灵需<strong>对应元素技能</strong>清除；或在<strong>同色领域</strong>内普攻 3 次（+30 分 +10% 血）</p>
-        <p><strong>生命恢复</strong>：连续击杀 9 个普通之灵 +20% 血（满血隐藏 · 被撞清零 · 技能杀不触发回血）</p>
-        <p><strong>体力</strong>：飞行 6 秒清零、耗尽禁飞，9 秒回满</p>
-        <p><strong>难度</strong>：每 100 分升一档（右上角 LV），最高 10 档 12+6 满配</p>
-        <p>受击后 1.5 秒无敌帧 · 血量归零游戏结束</p>
+      <div class="pause-col pause-bestiary">
+        <canvas id="bestiaryCanvas"></canvas>
+        <div class="bestiary-head">
+          <h2>敌方图鉴 · 元素之灵</h2>
+          <span class="bestiary-draghint">✥ 拖动模型可旋转</span>
+        </div>
+        <div class="bestiary-grid">
+          <div class="bestiary-cell" style="--accent:#9cc3e8">
+            <div class="bestiary-cell__viewport"></div>
+            <h3>元素之灵 <i>普通之灵</i></h3>
+            <p>从斗技场裂隙逸出的怨念魂火，被两道锈蚀铁枷锁束缚，成群漂荡追逐误入的旅人。</p>
+            <div class="bestiary-tags"><span class="is-dmg">撞击 -25%</span><span>清除 +10</span><span>速度 极快</span></div>
+          </div>
+          <div class="bestiary-cell" style="--accent:#2f7dff">
+            <div class="bestiary-cell__viewport"></div>
+            <h3>冰魔 <i>冰之堕圣遗物</i></h3>
+            <p>缠绕幽蓝魔焰的冰霜巫妖，周身寒气凝霜，所过之处万物结冰。</p>
+            <div class="bestiary-tags"><span class="is-dmg">撞击 -50%</span><span>清除 +30</span><span>弱点 霜新星</span></div>
+          </div>
+          <div class="bestiary-cell" style="--accent:#ff8a3c">
+            <div class="bestiary-cell__viewport"></div>
+            <h3>南瓜灯 <i>炎之堕圣遗物</i></h3>
+            <p>燃着橙红魔焰的南瓜魔灯，符文铁环上倒悬着淬火尖刺。</p>
+            <div class="bestiary-tags"><span class="is-dmg">撞击 -50%</span><span>清除 +30</span><span>弱点 落炎陨石</span></div>
+          </div>
+          <div class="bestiary-cell" style="--accent:#a98bff">
+            <div class="bestiary-cell__viewport"></div>
+            <h3>圣物匣 <i>雷之堕圣遗物</i></h3>
+            <p>封存天雷的古老圣物匣，紫焰自匣缝间溢出，低鸣如远雷。</p>
+            <div class="bestiary-tags"><span class="is-dmg">撞击 -50%</span><span>清除 +30</span><span>弱点 天雷殛灭</span></div>
+          </div>
+        </div>
+        <p class="bestiary-note">⚜ 堕圣遗物免疫异元素法术 — 踏入<strong>同色领域</strong>后普攻 3 次亦可净化；LV.5 起将施放元素激光（-10%）。</p>
       </div>
     </div>
     <p class="tips">按 Esc 或点击任意处继续游戏</p>
