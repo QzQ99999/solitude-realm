@@ -64,6 +64,10 @@ export class HUD {
   /** 体力条：飞行消耗、松开恢复；耗尽变红提示无法飞行。 */
   setStamina(pct, exhausted) {
     const p = Math.max(0, Math.min(100, pct));
+    // 数值没变就不写 DOM（游戏大部分时间体力是满的，省掉每帧样式写入）
+    if (p === this._staminaShown && exhausted === this._staminaExhausted) return;
+    this._staminaShown = p;
+    this._staminaExhausted = exhausted;
     this.staminaFill.style.width = `${p}%`;
     this.staminaFill.classList.toggle('is-exhausted', exhausted);
     this.staminaNum.textContent = `${Math.round(p)}%`;

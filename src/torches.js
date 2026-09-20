@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FlamePool, makeGlowTexture, spawnFlameParticle } from './flame.js';
+import { NEUTRAL_FLAME_COLOR } from './themes.js';
 
 /**
  * torches.js — 环绕场地活动范围边缘的 12 座悬浮火炬。
@@ -24,8 +25,8 @@ export class TorchRing {
     this.ready = false;
     this.group = null;
     this.torches = [];           // { group, baseY, phase, top }
-    this._flameColor = new THREE.Color('#40e0d0');
-    this._targetColor = new THREE.Color('#40e0d0');
+    this._flameColor = new THREE.Color(NEUTRAL_FLAME_COLOR);
+    this._targetColor = new THREE.Color(NEUTRAL_FLAME_COLOR);
     this._spawnAcc = new Array(TORCH_COUNT).fill(0);
     this._pixelRatio = 1;
 

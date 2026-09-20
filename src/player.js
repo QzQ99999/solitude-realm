@@ -436,9 +436,10 @@ export class Player {
     }
   }
 
-  /** 回到出生点（开局 / 重新开始时调用）：南侧空地，面向场地中央。 */
+  /** 回到出生点（开局 / 重新开始时调用）：南侧空地，面向场地中央。
+   *  出生点距圣杯 18 米——太近的话轨道相机（9.5m）会钻进圣杯碗体，画面全黑。 */
   respawn() {
-    this.position.set(0, 0, 12);
+    this.position.set(0, 0, 18);
     this.facing = Math.PI;
   }
 

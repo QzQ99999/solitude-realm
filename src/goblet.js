@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FlamePool, makeGlowTexture, spawnFlameParticle } from './flame.js';
+import { NEUTRAL_FLAME_COLOR } from './themes.js';
 
 /**
  * goblet.js — 场地中央的巨型圣杯。
  *
  * - 模型：Meshy 圣杯（FBX→GLB），贴图紫色区域（宝石/符文）处理成发光遮罩，
- *   发光颜色跟随当前元素领域；元素荒原（默认）燃烧青色火焰
+ *   发光颜色跟随当前元素领域；元素荒原（默认）燃烧月白青焰（比冰领蓝更白）
  * - 杯口火焰：加色发光粒子（flame.js 共享粒子池），随领域色变化
  * - 提供柱基碰撞半径（game 侧据此把玩家推出，防止穿模）
  */
@@ -15,7 +16,7 @@ export const GOBLET_POSITION = { x: 0, z: 0 };
 export const GOBLET_COLLIDER_RADIUS = 2.4;
 
 const GOBLET_HEIGHT = 7.2;      // 圣杯总高（米）
-const FLAME_COLOR_NEUTRAL = '#40e0d0'; // 元素荒原：青色火焰
+const FLAME_COLOR_NEUTRAL = NEUTRAL_FLAME_COLOR; // 元素荒原：月白青焰（比冰领蓝更白，避免混淆）
 const FLAME_Y = 6.55;           // 火焰燃烧高度（杯口沿，让火舌探出杯外）
 const FLAME_RADIUS = 1.25;      // 火焰分布半径（杯口内，按巨杯比例）
 

@@ -1,9 +1,11 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ELEMENT_INFO } from './themes.js';
 import { audio } from './audio.js';
 import { createBeamMaterial, BeamPass, beamConfig } from './vfx/BeamMaterial.js';
 import { createBeamTubeGeometry } from './vfx/ProceduralGeometry.js';
 import { createOrbMaterial } from './vfx/OrbMaterial.js';
+import { FlamePool, makeGlowTexture, spawnFlameParticle } from './flame.js';
 
 const SPIRIT_COUNT = 12; // 之灵池容量：随分数增长最多同时 12 颗在场
 const AREA = 40;
@@ -27,6 +29,15 @@ const TOUCH_DAMAGE_SPECIAL = 50; // 特殊之灵撞到玩家扣的血
 const SPECIAL_ACCENTS = { ice: '#2f7dff' };
 const SPAWN_MIN_RANGE = 20; // 生成时距离角色的最小距离（米）
 
+/* 特殊之灵模型朝向：始终面向角色（移动方向即追击方向），平滑转身、不自转。
+ * 三套 Meshy 模型的正面在本地 +Z（玩家实测校准），无需额外偏移。 */
+const MODEL_FACE_OFFSET = 0;
+const FACE_TURN_RATE = 5.5; // 朝向插值速率（越大转得越快）
+
+/* 符文环：悬在模型腰部高度、按模型宽度放大的圆环，绕自身法线公转。 */
+const RING_BASE_RADIUS = 0.82; // 圆环几何的原始半径（TorusGeometry）
+const RING_TILT = 1.35;        // 倾角（近水平），带轻微摇摆
+
 /** 随机生成下一次特殊之灵的出现间隔（1~30 秒）。 */
 function randomSpecialInterval() {
   return SPECIAL_INTERVAL_MIN + Math.random() * (SPECIAL_INTERVAL_MAX - SPECIAL_INTERVAL_MIN);
@@ -35,10 +46,11 @@ function randomSpecialInterval() {
 /**
  * spirits.js — 元素之灵：漂浮在竞技场上的幽魂，是法术的"靶子"。
  *
- * 普通之灵是「缚灵」—— 从斗技场裂隙里逸出的怨念魂火，被一圈锈蚀的
- * 铁枷锁束缚着；特殊之灵是「堕圣遗物」—— 悬浮的黑铁圣物匣，匣身裂隙
- * 里透出元素色的邪光，外圈环绕着符文铁环与倒悬的尖刺。命中判定、追逐、
- * 重生逻辑不变；被法术命中时炸成一蓬粒子、加分，然后在别处重生。
+ * 普通之灵是「缚灵」—— 从斗技场裂隙里逸出的怨念魂火（发光八面体），
+ * 被外环+内环两道 X 型交叉的锈蚀铁枷锁束缚着；特殊之灵是「堕圣遗物」
+ * —— Meshy 元素生物模型（冰魔/南瓜灯/圣物匣），外圈环绕一道符文铁环
+ * 与倒悬的尖刺，始终面向角色移动。命中判定、追逐、重生逻辑不变；被法术
+ * 命中时炸成一蓬粒子、加分，然后在别处重生。
  */
 export class SpiritField {
   constructor(scene, bursts, vfx) {
@@ -83,7 +95,7 @@ export class SpiritField {
       depthWrite: false,
       fog: false
     });
-    // 锈蚀铁枷锁（共享材质）
+    // 锈蚀铁枷锁（共享材质，特殊之灵环上尖刺也用它）
     this._bandMaterial = new THREE.MeshStandardMaterial({
       color: '#232833',
       roughness: 0.55,
@@ -96,18 +108,21 @@ export class SpiritField {
       // 魂火：拉长的八面体，像一簇竖直飘摇的火苗
       const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), this._bodyMaterial);
       core.scale.set(0.82, 1.7, 0.82);
-      // 束缚魂火的铁枷锁环，随机倾角
-      const band = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.04, 6, 22), this._bandMaterial);
+      // 束缚魂火的双道铁枷锁：外环 + 内环反向倾角，交叉成 X 型
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.045, 6, 24), this._bandMaterial);
       band.rotation.set(Math.random() * 1.2 + 0.5, 0, Math.random() * Math.PI);
+      const band2 = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.04, 6, 20), this._bandMaterial);
+      band2.rotation.set(-(Math.random() * 1.2 + 0.5), Math.random() * Math.PI, Math.random() * Math.PI);
       const halo = new THREE.Sprite(this._haloMaterial);
       halo.scale.setScalar(2.2);
-      group.add(core, band, halo);
+      group.add(core, band, band2, halo);
       this._group.add(group);
 
       this.spirits.push({
         group,
         core,
         band,
+        band2,
         halo,
         alive: false,
         respawn: 0,
@@ -131,7 +146,7 @@ export class SpiritField {
     /** LV.5+ 特殊之灵激光射击：由 game.js 每帧同步当前等级。 */
     this.laserTier = 1;
 
-    /* ---- 特殊元素之灵「堕圣遗物」：黑铁圣物匣 + 元素邪光晶体 + 符文铁环 ---- */
+    /* ---- 特殊元素之灵「堕圣遗物」：Meshy 元素生物 + 元素色符文铁环 ---- */
     this.specials = [];
     this._specialTimer = randomSpecialInterval();
     this.onSpecialSpawn = null;
@@ -146,32 +161,7 @@ export class SpiritField {
     const spikeGeometry = new THREE.ConeGeometry(0.1, 0.34, 5);
     for (let i = 0; i < 6; i++) { // 特殊之灵池容量：随分数增长最多同时 6 颗在场
       const group = new THREE.Group();
-      // 黑铁匣身：裂隙里透出元素色的邪光
-      const core = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.46, 1),
-        new THREE.MeshStandardMaterial({
-          color: '#151922',
-          emissive: '#9fd8ff',
-          emissiveIntensity: 1.6,
-          roughness: 0.45,
-          metalness: 0.7,
-          flatShading: true,
-          fog: false
-        })
-      );
-      // 顶端元素晶体（单独材质，spawnSpecial 按元素染色）
-      const crystal = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.26, 0),
-        new THREE.MeshStandardMaterial({
-          color: '#dfeeff',
-          emissive: '#9fd8ff',
-          emissiveIntensity: 2.6,
-          roughness: 0.25,
-          fog: false
-        })
-      );
-      crystal.position.y = 0.52;
-      // 环绕的符文铁环，环上倒悬三根尖刺
+      // 符文铁环：悬在模型中部，带倒悬尖刺
       const ring = new THREE.Mesh(
         specialRingGeometry,
         new THREE.MeshBasicMaterial({ color: '#9fd8ff', transparent: true, opacity: 0.85, fog: false })
@@ -194,7 +184,7 @@ export class SpiritField {
         depthWrite: false
       }));
       halo.scale.setScalar(3.4);
-      group.add(core, crystal, ring, halo);
+      group.add(ring, halo);
       group.visible = false;
       this._group.add(group);
 
@@ -242,7 +232,7 @@ export class SpiritField {
       laserOrb.renderOrder = 9;
       this._group.add(laserOrb);
       const slot = {
-        group, core, crystal, ring, halo,
+        group, ring, halo, models: null,
         alive: false,
         element: 'ice',
         pos: new THREE.Vector3(),
@@ -278,6 +268,15 @@ export class SpiritField {
       };
       this.specials.push(slot);
     }
+
+    /* ---- 共享元素火焰粒子池（特殊之灵的元素特效） ---- */
+    this._fx = new FlamePool(scene, 520, makeGlowTexture(), true);
+    this._fxAcc = new Array(6).fill(0);
+
+    /* ---- Meshy 敌人模型（异步装载，就绪后附到槽位） ---- */
+    this._modelsReady = false;
+    this._protos = null;
+    this._loadModels();
   }
 
   /* —— LV.5+ 特殊之灵激光射击 —— */
@@ -291,6 +290,12 @@ export class SpiritField {
   _hideLaser(slot) {
     for (const mesh of slot.laserMeshes) mesh.visible = false;
     slot.laserOrb.visible = false;
+  }
+
+  /** 激光发射点：模型身体中部（与模型同一水平位置），而不是脚底。 */
+  _laserFrom(slot, out) {
+    const midY = this._modelStats?.[slot.element]?.midY ?? 0.8;
+    return out.set(slot.pos.x, slot.baseY + midY, slot.pos.z);
   }
 
   /** 按之灵元素给激光与蓄能球换色。 */
@@ -335,8 +340,8 @@ export class SpiritField {
         L.cd -= dt;
         if (L.cd <= 0) {
           // 锁定玩家当前位置：激光从特殊之灵体内单方向射向该点，到点为止
-          L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
-          L.dir.set(playerPos.x - L.from.x, 1.15 - slot.baseY, playerPos.z - L.from.z);
+          this._laserFrom(slot, L.from);
+          L.dir.set(playerPos.x - L.from.x, 1.15 - L.from.y, playerPos.z - L.from.z);
           L.len = L.dir.length();
           L.dir.divideScalar(L.len); // 单位方向
           if (L.len > 2.2) {
@@ -352,8 +357,8 @@ export class SpiritField {
         break;
       }
       case 'tele': {
-        // 起点始终跟随特殊之灵当前位置：光束从之灵体内射向地图外，不穿过反侧
-        L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
+        // 起点始终跟随特殊之灵当前位置（身体中部）：光束从之灵体内射向地图外
+        this._laserFrom(slot, L.from);
         // 蓄能段：只画出炮口附近一小截，闪烁提示弹道；蓄能球随之长大
         const charge = Math.min(1, Math.max(0, L.t / 1.0));
         this._syncLaser(slot, L.from, L.dir, L.len + 170, 0.055, 0.35 + 0.45 * Math.abs(Math.sin(L.t * 12)), 1);
@@ -376,8 +381,8 @@ export class SpiritField {
       }
       case 'fire': {
         const dur = 0.22;
-        // 起点跟随特殊之灵；光束全弹道点亮，末段宽度和亮度一起收
-        L.from.set(slot.pos.x, slot.baseY, slot.pos.z);
+        // 起点跟随特殊之灵（身体中部）；光束全弹道点亮，末段宽度和亮度一起收
+        this._laserFrom(slot, L.from);
         const k = L.t / dur;
         this._syncLaser(slot, L.from, L.dir, L.len + 170, 1, 1 - k, 1 - 0.45 * k);
         // 蓄能球释放瞬间炸掉
@@ -422,14 +427,69 @@ export class SpiritField {
     this._specialTarget = Math.min(count, this.specials.length);
   }
 
-  /** 场上特殊之灵目标数量（随分数增长）。 */
-  setSpecialTarget(count) {
-    this._specialTarget = Math.min(count, this.specials.length);
+  /* —— Meshy 敌人模型装载 —— */
+
+  /** 模型在游戏尺度下的包围盒：中部高度 + 水平半径（符文环适配用）。 */
+  _modelBox(proto) {
+    proto.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(proto);
+    const size = box.getSize(new THREE.Vector3());
+    return {
+      midY: size.y / 2,
+      radius: Math.max(size.x, size.z) / 2
+    };
   }
 
-  /** 场上普通之灵目标数量（随分数增长）。 */
-  setNormalTarget(count) {
-    this._activeNormals = Math.min(count, this.spirits.length);
+  /** 统一处理：居中到轴心、脚底落 y=0、缩放到目标高度，返回独立 Group 模板。 */
+  _prepModel(scene, height) {
+    scene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(scene);
+    const size = box.getSize(new THREE.Vector3());
+    const scale = height / Math.max(size.y, 0.001);
+    scene.scale.setScalar(scale);
+    const g = new THREE.Group();
+    g.add(scene);
+    scene.position.x = -(box.min.x + size.x / 2) * scale;
+    scene.position.z = -(box.min.z + size.z / 2) * scale;
+    scene.position.y = -box.min.y * scale;
+    return g;
+  }
+
+  async _loadModels() {
+    try {
+      const loader = new GLTFLoader();
+      const [lich, fire, ipos] = await Promise.all([
+        loader.loadAsync('spirits/lich.glb'),
+        loader.loadAsync('spirits/fire.glb'),
+        loader.loadAsync('spirits/ipos.glb')
+      ]);
+      this._protos = {
+        lich: this._prepModel(lich.scene, 1.75),
+        fire: this._prepModel(fire.scene, 1.55),
+        ipos: this._prepModel(ipos.scene, 1.7)
+      };
+      // 特殊之灵模型在游戏尺度下的包围盒（按元素名索引：圆环居中高度 + 环绕半径）
+      this._modelStats = {
+        ice: this._modelBox(this._protos.lich),
+        fire: this._modelBox(this._protos.fire),
+        storm: this._modelBox(this._protos.ipos)
+      };
+      // 特殊之灵：三套模型都挂上，spawnSpecial 按元素切换可见性
+      for (const slot of this.specials) {
+        slot.models = {
+          ice: this._protos.lich.clone(),
+          fire: this._protos.fire.clone(),
+          storm: this._protos.ipos.clone()
+        };
+        for (const m of Object.values(slot.models)) {
+          m.visible = false;
+          slot.group.add(m);
+        }
+      }
+      this._modelsReady = true;
+    } catch (error) {
+      console.error('[spirits] 敌人模型装载失败', error);
+    }
   }
 
   /** 游戏开始：立即生成所有普通之灵（距角色至少 20 米），围绕 playerPos 分布。 */
@@ -548,10 +608,22 @@ export class SpiritField {
     slot.laser.hitDone = false;
     this._hideLaser(slot);
 
-    slot.core.material.emissive.set(accent);
-    slot.crystal.material.emissive.set(accent);
     slot.ring.material.color.set(accent);
     slot.halo.material.color.set(accent);
+    for (const [el, m] of Object.entries(slot.models ?? {})) m.visible = el === element;
+    // 符文环/光晕：包住当前元素模型——升到模型中部，半径按模型宽度放大
+    const stats = this._modelStats?.[element];
+    if (stats) {
+      const ringRadius = Math.min(Math.max(stats.radius * 1.5, 1.05), 1.8);
+      slot.ring.scale.setScalar(ringRadius / RING_BASE_RADIUS);
+      slot.ring.position.y = stats.midY;
+      slot.halo.position.y = stats.midY;
+    }
+    // 出生即面向角色；三套模型一起归位，切元素时不跳向
+    const faceYaw = playerPos
+      ? Math.atan2(playerPos.x - slot.pos.x, playerPos.z - slot.pos.z) + MODEL_FACE_OFFSET
+      : MODEL_FACE_OFFSET;
+    for (const m of Object.values(slot.models ?? {})) m.rotation.y = faceYaw;
     slot.group.visible = true;
     slot.group.position.set(slot.pos.x, slot.baseY, slot.pos.z);
 
@@ -661,6 +733,7 @@ export class SpiritField {
       if (aliveCount < this._specialTarget) this.spawnSpecial(playerPos);
     }
 
+    let slotIdx = 0;
     for (const slot of this.specials) {
       if (!slot.alive) {
         // 死亡的特殊之灵：确保激光收起
@@ -715,19 +788,54 @@ export class SpiritField {
         slot.baseY + Math.sin(elapsed * 1.6 + slot.pos.x) * 0.26,
         slot.pos.z
       );
-      slot.ring.rotation.z += dt * 1.3;
-      slot.ring.rotation.x += dt * 0.45;
+      // 符文环：绕自身法线公转 + 轻微摇摆（悬在模型中部，不翻滚砸到模型）
+      slot.ring.rotation.z += dt * 1.5;
+      slot.ring.rotation.x = RING_TILT + Math.sin(elapsed * 0.9 + slot.phase) * 0.14;
       const flashK = slot.flash / SPECIAL_FLASH_TIME;
-      slot.core.rotation.y += dt * (1.2 + flashK * 6);
-      slot.core.material.emissiveIntensity = 1.6 + flashK * 8;
-      // 顶端晶体自转 + 呼吸，受击时骤亮
-      slot.crystal.rotation.y -= dt * (1.8 + flashK * 6);
-      slot.crystal.material.emissiveIntensity = 2.6 + flashK * 9
-        + Math.sin(elapsed * 3.1 + slot.phase) * 0.5;
+      // 模型始终面向角色（追击方向），平滑转身、不自转；受击闪光由光晕放大表达
+      const activeModel = slot.models?.[slot.element];
+      if (activeModel && playerPos) {
+        const targetYaw = Math.atan2(playerPos.x - slot.pos.x, playerPos.z - slot.pos.z)
+          + MODEL_FACE_OFFSET;
+        let delta = targetYaw - activeModel.rotation.y;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        activeModel.rotation.y += delta * Math.min(1, dt * FACE_TURN_RATE);
+      }
       slot.halo.scale.setScalar(3.2 + flashK * 1.4 + Math.sin(elapsed * 2.6 + slot.pos.z) * 0.2);
+      // —— 元素火焰特效：特殊之灵周身燃烧对应颜色的元素火 ——
+      // 高密度火舌粒子沿身体轮廓升腾（白热核心 → 元素色 → 暗色焰尖），
+      // 三系只在颜色与节奏上区分：火=橙焰 / 冰=蓝焰（升得慢）/ 雷=紫焰（闪烁快）
+      const acc = slot.ring.material.color; // 当前元素的强调色（THREE.Color）
+      const stats = this._modelStats?.[slot.element];
+      const bodyH = stats ? stats.midY * 2 : 1.6;
+      const bodyR = stats ? Math.min(stats.radius * 0.95, 1.05) : 0.6;
+      this._fxAcc[slotIdx] = (this._fxAcc[slotIdx] ?? 0) + dt * 70;
+      while (this._fxAcc[slotIdx] >= 1) {
+        this._fxAcc[slotIdx] -= 1;
+        const a = Math.random() * Math.PI * 2;
+        const rr = bodyR * (0.3 + Math.random() * 0.6);
+        const px = slot.pos.x + Math.cos(a) * rr;
+        const pz = slot.pos.z + Math.sin(a) * rr;
+        const py = slot.baseY + 0.06 + Math.random() * bodyH * 0.6;
+        if (slot.element === 'ice') {
+          spawnFlameParticle(this._fx, px, py, pz, acc,
+            { vy: 1.3 + Math.random() * 0.7, life: 0.6 + Math.random() * 0.4, maxLife: 1.0,
+              size0: 0.75 + Math.random() * 0.35, size1: 0.18, alpha: 0.85, sway: true });
+        } else if (slot.element === 'fire') {
+          spawnFlameParticle(this._fx, px, py, pz, acc,
+            { vy: 1.6 + Math.random() * 0.9, life: 0.55 + Math.random() * 0.4, maxLife: 0.95,
+              size0: 0.9 + Math.random() * 0.4, size1: 0.22, alpha: 1.0, sway: true });
+        } else {
+          spawnFlameParticle(this._fx, px, py, pz, acc,
+            { vy: 1.5 + Math.random() * 0.8, life: 0.4 + Math.random() * 0.3, maxLife: 0.7,
+              size0: 0.75 + Math.random() * 0.35, size1: 0.15, alpha: 1.0, sway: true });
+        }
+      }
 
       // —— LV.5+ 激光射击 ——
       this._updateLaser(slot, dt, playerPos);
+      slotIdx++;
     }
 
     for (let i = 0; i < this.spirits.length; i++) {
@@ -785,16 +893,23 @@ export class SpiritField {
       );
       spirit.core.rotation.y += dt * (spirit.chasing ? 2.6 : 1.4);
       spirit.core.rotation.x += dt * 0.6;
-      // 铁枷锁缓慢反旋，追逐时转速加快、环面翻平（像张开的枷锁）
+      // 双道铁枷锁：外环缓慢反旋，内环反向旋转，倾角镜像摆动保持 X 型交叉
+      // （追逐时转速加快、环面翻平，像张开的枷锁）
       spirit.band.rotation.y -= dt * (spirit.chasing ? 2.2 : 0.8);
       spirit.band.rotation.x = 0.9 + Math.sin(elapsed * 1.3 + spirit.phase) * 0.35;
+      spirit.band2.rotation.y += dt * (spirit.chasing ? 1.8 : 0.6);
+      spirit.band2.rotation.x = -0.9 - Math.sin(elapsed * 1.3 + spirit.phase) * 0.35;
       spirit.halo.scale.setScalar(
         (2.0 + Math.sin(elapsed * 3.1 + spirit.pos.z) * 0.25) * (spirit.chasing ? 1.3 : 1)
       );
       // 普通之灵保持固定蓝白色，不随世界变色——彩色的才是特殊之灵
     }
 
-    if (this._touched > 0) this.onTouch?.(this._touched);
+    this._fx.update(dt, elapsed);
+  }
+
+  setPixelRatio(r) {
+    this._fx?.setPixelRatio(r);
   }
 
   dispose() {
@@ -809,5 +924,6 @@ export class SpiritField {
     this._bodyMaterial.dispose();
     this._haloMaterial.dispose();
     this._bandMaterial.dispose();
+    this._fx.geometry.dispose();
   }
 }

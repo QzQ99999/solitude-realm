@@ -8,6 +8,10 @@
 
 export const ELEMENTS = ['ice', 'fire', 'storm'];
 
+/** 元素荒原（中性领域）的圣杯/火炬火焰色：月白青焰。
+ *  比冰领的饱和钴蓝（#56d8ff）白得多、淡得多，一眼可区分两种领域。 */
+export const NEUTRAL_FLAME_COLOR = '#e6fbf7';
+
 export const ELEMENT_INFO = {
   ice: { key: 'Q', label: '霜新星', accent: '#56d8ff', family: 'ice' },
   fire: { key: 'E', label: '落炎陨石', accent: '#ff8a3c', family: 'fire' },

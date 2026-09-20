@@ -12,7 +12,7 @@ import { Goblet, GOBLET_COLLIDER_RADIUS, GOBLET_POSITION } from './goblet.js';
 import { TorchRing } from './torches.js';
 import { VFXSystem } from './vfx/VFXSystem.js';
 import { audio } from './audio.js';
-import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES } from './themes.js';
+import { ELEMENTS, ELEMENT_INFO, FAMILY_OF, THEMES, NEUTRAL_FLAME_COLOR } from './themes.js';
 
 const COOLDOWNS = { ice: 5, fire: 5, storm: 5 }; // 技能统一 5 秒冷却
 const STAMINA_DRAIN_TIME = 6; // 满体力持续飞行的秒数
@@ -34,7 +34,7 @@ export class Game {
     this.canvas = canvas;
 
     /* ---- 渲染 ---- */
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     // 动态分辨率：像素比上限 1.5（高分屏下 2.0 的填充率开销太大），
     // 帧率不足时 frame() 里的控制器会再逐级下调，稳住 90+ FPS
     this._pxRatioCap = Math.min(window.devicePixelRatio, 1.5);
@@ -129,6 +129,7 @@ export class Game {
     this.aimPoint = new THREE.Vector3(0, 0, -7);
     this._scratchF = new THREE.Vector3();
     this._scratchR = new THREE.Vector3();
+    this._moveDir = new THREE.Vector3(); // 每帧复用的移动方向（避免每帧分配）
     this._aimHit = new THREE.Vector3();
     this._hurtColor = new THREE.Color('#ff4638');
 
@@ -807,6 +808,7 @@ export class Game {
     this.world.weather.setPixelRatio(this._pxRatio);
     this.goblet?.setPixelRatio(this._pxRatio);
     this.torches?.setPixelRatio(this._pxRatio);
+    this.spirits.setPixelRatio?.(this._pxRatio);
   }
 
   frame(dt) {
@@ -824,16 +826,16 @@ export class Game {
     }
 
     // 动态分辨率控制器：每 1.5 秒按近期帧率升降像素比（0.7 ~ 上限），
-    // 帧率 <88 降档、>100 升档，把帧率稳在 90 上下。
+    // 帧率 <93 降档、>101 升档，把帧率稳在 95 上下。
     // 近期帧率 <40 视为标签页被节流/遮挡而非 GPU 瓶颈，不再继续降档。
     this._resT = (this._resT ?? 0) + dt;
     if (this._resT >= 1.5) {
       this._resT = 0;
       const recent = this._recentFps ?? 0;
-      if (recent >= 40 && recent < 88 && this._pxRatio > 0.7) {
+      if (recent >= 40 && recent < 93 && this._pxRatio > 0.7) {
         this._pxRatio = Math.max(0.7, this._pxRatio - 0.15);
         this._applyPixelRatio();
-      } else if (recent > 100 && this._pxRatio < this._pxRatioCap) {
+      } else if (recent > 101 && this._pxRatio < this._pxRatioCap) {
         this._pxRatio = Math.min(this._pxRatioCap, this._pxRatio + 0.1);
         this._applyPixelRatio();
       }
@@ -846,7 +848,7 @@ export class Game {
     }
 
     // 移动输入（相对相机朝向）
-    const move = new THREE.Vector3();
+    const move = this._moveDir.set(0, 0, 0);
     const forward = this._scratchF.set(-Math.sin(this.orbit.yaw), 0, -Math.cos(this.orbit.yaw));
     // 屏幕右侧 = 视线方向叉乘世界向上：视线是 (-sinY, -cosY)，所以右是 (cosY, -sinY)
     const right = this._scratchR.set(Math.cos(this.orbit.yaw), 0, -Math.sin(this.orbit.yaw));
@@ -986,8 +988,8 @@ export class Game {
     this.spirits.update(dt, this.elapsed, this.player.position);
     this.spirits.laserTier = this.tier; // LV.5+ 特殊之灵激光射击速率
     this.world.update(dt, this.elapsed, this.player.position, this.hud.vignette);
-    // 圣杯：火焰/烟/发光颜色跟随当前领域（元素荒原 = 青色火焰）
-    const realmAccent = this.world.current === 'neutral' ? '#40e0d0' : this.world.currentAccent;
+    // 圣杯：火焰/发光颜色跟随当前领域（元素荒原 = 月白青焰，比冰领蓝更白）
+    const realmAccent = this.world.current === 'neutral' ? NEUTRAL_FLAME_COLOR : this.world.currentAccent;
     this.goblet.update(dt, this.elapsed, realmAccent);
     this.torches.update(dt, this.elapsed, realmAccent);
     // 全场地特效：浪潮/地裂推进；领域残辉跟随当前世界（退回荒原即消散）

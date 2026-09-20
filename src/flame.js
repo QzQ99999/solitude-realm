@@ -124,6 +124,8 @@ export class FlamePool {
         this._size[i] = 0;
       }
     }
+    // 只画活跃粒子：死亡槽位（alpha=0）不送入顶点着色器
+    this.geometry.setDrawRange(0, this.list.length);
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.aColor.needsUpdate = true;
     this.geometry.attributes.aAlpha.needsUpdate = true;
